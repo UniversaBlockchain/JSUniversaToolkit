@@ -1,5 +1,7 @@
 # UniversaToolkit
-JS and Scala.JS API to the crypto library, cloud and tools
+JS and Scala.JS API to the crypto library, cloud and tools.
+
+Built distributive files can be found in [dist folder](https://github.com/UniversaBlockchain/JSUniversaToolkit/tree/master/dist).
 
 To run unit tests you need to download [Chrome driver](https://sites.google.com/a/chromium.org/chromedriver/downloads)
 and add it to your environment PATH variable.
@@ -12,8 +14,8 @@ DISPLAY=:1 sbt
 ```
 
 
-To get js api file:
+To get js api file run:
 
-`sbt “project crypto_cloud_api” fastOptJS`
+`sbt “project crypto_cloud_api” fullOptJS`
 
-js file with api is located in: crypto_cloud/target/scala-2.12/crypto_cloud_api-fastopt.js
+api js file is located in: crypto_cloud/target/scala-2.12/crypto_cloud_api-fastopt.js
