@@ -111,15 +111,17 @@ object Tools {
   }
 
   def importAllSerializedObjects(
-                                  sessionToken: String,
-                                  tagName: String
-                                ): Future[js.Array[Seq[Byte]]] = {
+    sessionToken: String,
+    tagName: String
+  ): Future[js.Array[Seq[Byte]]] = {
 
     val tags = ListBuffer[String](tagName)
     val Limit = 50
 
-    def nextBatch(items2: Future[ListBuffer[(Option[Int], Seq[Byte])]],
-                  results: js.Array[Seq[Byte]]): Future[js.Array[Seq[Byte]]] = {
+    def nextBatch(
+      items2: Future[ListBuffer[(Option[Int], Seq[Byte])]],
+      results: js.Array[Seq[Byte]]
+    ): Future[js.Array[Seq[Byte]]] = {
       items2
         .flatMap { items =>
           val count = items.length

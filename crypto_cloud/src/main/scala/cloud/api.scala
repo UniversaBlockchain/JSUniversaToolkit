@@ -23,23 +23,21 @@ import scala.util.{Failure, Success}
 
 @JSExportTopLevel("CryptoCloud.ApiError")
 class ApiError(
-                override val message: String = "CryptoCloud API error",
-                override val details: HashMap[String, Any] = HashMap[String, Any]()
-              ) extends EncryptionError(message, details) {
-  override def toString: String = s"CryptoCloud API error: $message"
-}
+  override val message: String = "CryptoCloud: API error",
+  override val details: HashMap[String, Any] = HashMap[String, Any]()
+) extends EncryptionError(message, details)
 
 @JSExportTopLevel("CryptoCloud.NotFound")
 class NotFound(
-                override val message: String = "item not found",
-                override val details: HashMap[String, Any] = HashMap[String, Any]()
-              ) extends ApiError(message, details) {}
+  override val message: String = "CryptoCloud: item not found",
+  override val details: HashMap[String, Any] = HashMap[String, Any]()
+) extends ApiError(message, details)
 
 @JSExportTopLevel("CryptoCloud.WriteConflict")
 class WriteConflict(
-                     override val message: String = "write conflict",
-                     override val details: HashMap[String, Any] = HashMap[String, Any]()
-                   ) extends ApiError(message, details) {}
+  override val message: String = "CryptoCloud: write conflict",
+  override val details: HashMap[String, Any] = HashMap[String, Any]()
+) extends ApiError(message, details)
 
 object ApiError {
   def apply(message: String, details: HashMap[String, Any]): ApiError = {
@@ -47,7 +45,7 @@ object ApiError {
   }
 
   def apply(details: HashMap[String, Any]): ApiError = {
-    new ApiError("CryptoCloud API error", details)
+    new ApiError("CryptoCloud: API error", details)
   }
 }
 
@@ -57,7 +55,7 @@ object NotFound {
   }
 
   def apply(details: HashMap[String, Any]): NotFound = {
-    new NotFound("item not found", details)
+    new NotFound("CryptoCloud: item not found", details)
   }
 }
 
@@ -67,7 +65,7 @@ object WriteConflict {
   }
 
   def apply(details: HashMap[String, Any]): WriteConflict = {
-    new WriteConflict("write conflict", details)
+    new WriteConflict("CryptoCloud: write conflict", details)
   }
 }
 
@@ -75,8 +73,20 @@ object WriteConflict {
 object CryptoCloud {
   val logCalls = false
 
-  val API_PROVIDER_ORIGIN = "https://chatle.universa.io"
+  val API_PROVIDER_ORIGIN = "https://chatle.mainnetwork.io"
   val __ALWAYS_USE_NETWORK = false
+
+  def deserialize(serialized: js.Dictionary[Any]): Future[Api] = {
+    val privateKey = new PrivateKey(decode64(serialized("private_key").asInstanceOf[String]))
+    val sessionToken = serialized("session_token").asInstanceOf[String]
+    val partyId = serialized("party_id").asInstanceOf[Int]
+
+    val api = new Api(privateKey, sessionToken, partyId)
+
+    for {
+      _ <- api.loadRegistry
+    } yield api
+  }
 
   /** Converts nick to binary token
     *
@@ -105,15 +115,20 @@ object CryptoCloud {
     * @param password - registry password
     */
   def connectWithPassword(
-                           appToken: String,
-                           nick: String,
-                           password: String
-                         ): Future[Api] = {
+    appToken: String,
+    nick: String,
+    password: String
+  ): Future[Api] = {
 
     def getRegistry =
       call(
         "registry_get",
-        HashMap("data" -> HashMap("appToken" -> appToken, "nick_token" -> encode64(nickToToken(nick))))
+        HashMap(
+          "data" -> HashMap(
+            "appToken" -> appToken,
+            "nick_token" -> encode64(nickToToken(nick))
+          )
+        )
       ).asInstanceOf[Future[js.Dynamic]]
 
     def getPackedKey(registryResponse: js.Dynamic): Future[Seq[Byte]] = {
@@ -126,7 +141,8 @@ object CryptoCloud {
           throw new AuthenticationError("bad registry object")
 
         val d = capsule.decrypt(password)
-        if (!d) throw AuthenticationError("access forbidden", HashMap(("code", "access_forbidden")))
+        if (!d)
+          throw AuthenticationError("access forbidden", HashMap(("code", "access_forbidden")))
 
         val registryData = capsule.privateData.get
         val mainKey = registryData("main_key").asInstanceOf[mutable.HashMap[String, Any]]
@@ -152,7 +168,10 @@ object CryptoCloud {
     * @param appToken         - secret app token to identify client
     * @param packedPrivateKey - BOSS encoded PrivateKey
     */
-  def connect(appToken: String, packedPrivateKey: js.Array[Byte]): Future[Api] = {
+  def connect(
+    appToken: String,
+    packedPrivateKey: js.Array[Byte]
+  ): Future[Api] = {
     val client_nonce = randomBytes(16)
     val privateKey = new models.PrivateKey(packedPrivateKey)
 
@@ -211,9 +230,9 @@ object CryptoCloud {
     * @param options    - hashmap of call options
     */
   def call(
-            methodName: String,
-            options: HashMap[String, Any] = HashMap[String, Any]()
-          ): Future[Any] = {
+    methodName: String,
+    options: HashMap[String, Any] = HashMap[String, Any]()
+  ): Future[Any] = {
     val p = Promise[Any]()
     val xhr = new dom.XMLHttpRequest()
     xhr.onload = { e: dom.Event =>
@@ -230,8 +249,6 @@ object CryptoCloud {
               p.success(Boss.load(decode64(encodedMessage)))
             } catch {
               case e: Throwable =>
-//                logger.log("Failed to load a BOSS message")
-                // logger.log(encodedMessage)
                 p.failure(e)
             }
           } else p.success(response)
@@ -261,11 +278,6 @@ object CryptoCloud {
     var url = s"/api/$methodName"
     url = s"$API_PROVIDER_ORIGIN$url"
 
-
-
-    // if (logCalls) logger.log(
-    //   s"POST: ${url}")
-
     xhr.open("POST", url)
     xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded")
     val headers = options.get("headers")
@@ -273,8 +285,6 @@ object CryptoCloud {
     headers match {
       case Some(value) => {
         for ((k, v) <- value.asInstanceOf[HashMap[String, String]]) {
-          // if (logCalls) logger.log(
-          //   s"POST: -- ${k}: ${v}")
           xhr.setRequestHeader(k, v)
         }
       }
@@ -283,7 +293,6 @@ object CryptoCloud {
 
     var data = null
     val optData = options.get("data")
-
 
     optData match {
       case Some(value) =>
@@ -301,8 +310,6 @@ object CryptoCloud {
 
         val args = data.mkString("&")
 
-//        if (logCalls) logger.log(
-//          s"POST: *** $url?$args")
         xhr.send(args)
       case None => xhr.send()
     }
@@ -321,26 +328,49 @@ object CryptoCloud {
   }
 
   @JSExportTopLevel("CryptoCloud.connectWithPassword")
-  def connectWithPasswordJS(appToken: String, nick: String, password: String): js.Promise[Api] = {
+  def connectWithPasswordJS(
+    appToken: String,
+    nick: String,
+    password: String
+  ): js.Promise[Api] =
     CryptoCloud.connectWithPassword(appToken, nick, password).toJSPromise
-  }
 
   def execute(
-               command: String,
-               sessionToken: String,
-               params: HashMap[String, Any] = HashMap[String, Any]()
-             ): Future[HashMap[String, Any]] = {
+    command: String,
+    sessionToken: String,
+    params: HashMap[String, Any] = HashMap[String, Any](),
+    attempt: Int = 1
+  ): Future[HashMap[String, Any]] = {
+    if (attempt > 5)
+      return Future.failed(new ApiError("Too many failed attempts", params))
+
     val data = HashMap(
       ("sessionToken", sessionToken),
       ("params", encode64(Boss.dump(params)))
     )
 
-    CryptoCloud.call(command, HashMap("data" -> data)).asInstanceOf[Future[HashMap[String, Any]]]
+    def tryAgain(e: Throwable): Future[HashMap[String, Any]] = {
+      for {
+        wakeUp <- sleep(50)
+        response <- execute(command, sessionToken, params, attempt + 1)
+      } yield response
+    }
+
+    val mayFail = for {
+      response <- CryptoCloud.call(command, HashMap("data" -> data))
+    } yield {
+      response.asInstanceOf[HashMap[String, Any]]
+    }
+
+    mayFail recoverWith { case e => tryAgain(e) }
   }
 
-  def loadItemsForWorker(sessionToken: String,
-                         tagName: String,
-                         postMessageFunction: js.Function1[js.Any, Unit]): Unit = {
+  def loadItemsForWorker(
+    sessionToken: String,
+    tagName: String,
+    postMessageFunction: js.Function1[js.Any, Unit]
+  ): Unit = {
+    println("Run load items for worker")
     val itemsResult = Tools.importAllSerializedObjects(sessionToken, tagName)
     itemsResult.onComplete {
       case Success(value) =>
@@ -352,8 +382,26 @@ object CryptoCloud {
     }
   }
 
-  def loadItemsAndSerialize(sessionToken: String,
-                            options: mutable.HashMap[String, Any]): Future[ListBuffer[(Option[Int], Seq[Byte])]] = {
+  def loadItemsWorker(
+    serializedApi: js.Dictionary[Any],
+    options: js.Dictionary[Any],
+    callback: js.Function1[js.Any, Unit]
+  ): Unit = {
+    deserialize(serializedApi) map {
+      api => api.loadItemsEncrypted(options).onComplete {
+        case Success(items) =>
+          val values = items.map(v => UniversaTools.encode64(Boss.dump(v))).toJSArray
+          callback(js.Array("Items", values))
+        case Failure(exception) =>
+          callback(exception.getMessage) //TODO to unify with privateKey use smth like js.Dynamic(...)
+      }
+    }
+  }
+
+  def loadItemsAndSerialize(
+    sessionToken: String,
+    options: mutable.HashMap[String, Any]
+  ): Future[ListBuffer[(Option[Int], Seq[Byte])]] = {
     val afterSerial = options.getOrElse("afterSerial", null)
     val beforeSerial = options.getOrElse("beforeSerial", null)
     var latestSerial = options.getOrElse("latestSerial", null)
@@ -392,14 +440,11 @@ object CryptoCloud {
 
     for {
       result <- itemsLoad.recoverWith { case anyException =>
-//        logger.error(s"Retrying because of: ${anyException.toString}")
         itemsLoad
       }
       loadedItems = makeItems(result)
     } yield loadedItems
   }
-
-
 }
 
 /** The CryptoCloud main service point. The Java's Service analogue, somewhat more
@@ -412,16 +457,25 @@ object CryptoCloud {
   */
 @JSExportTopLevel("CryptoCloud.Api")
 class Api(
-           val privateKey: models.PrivateKey,
-           val sessionToken: String,
-           val partyId: Int
-         ) {
+  val privateKey: models.PrivateKey,
+  val sessionToken: String,
+  val partyId: Int
+) {
+  type AnyMap = HashMap[String, Any]
+
   private val itemCache = HashMap.empty[String, Any]
   private val parties = HashMap.empty[Int, Party]
   private val connectors = HashMap.empty[Int, Connector]
 
   @JSExport("sessionToken")
   def sessionTokenJS = sessionToken
+
+  @JSExport("serialized")
+  def serialized = HashMap(
+    ("private_key", encode64(privateKey.pack)),
+    ("session_token", sessionToken),
+    ("party_id", partyId)
+  ).toJSDictionary
 
   /** Represents current API user */
   @JSExport
@@ -439,19 +493,37 @@ class Api(
     * @param params  - command's params
     */
   def execute(
-               command: String,
-               params: HashMap[String, Any] = HashMap[String, Any]()
-             ): Future[HashMap[String, Any]] = {
+    command: String,
+    params: HashMap[String, Any] = HashMap[String, Any](),
+    attempt: Int = 1
+  ): Future[HashMap[String, Any]] = {
+    if (attempt > 5)
+      return Future.failed(new ApiError("Too many failed attempts", params))
+
     val data = HashMap(
       ("sessionToken", sessionToken),
       ("params", encode64(Boss.dump(params)))
     )
 
-    CryptoCloud.call(command, HashMap("data" -> data)).asInstanceOf[Future[HashMap[String, Any]]]
+    def tryAgain(e: Throwable): Future[HashMap[String, Any]] = {
+      for {
+        wakeUp <- sleep(50)
+        response <- execute(command, params, attempt + 1)
+      } yield response
+    }
+
+    val mayFail = for {
+      response <- CryptoCloud.call(command, HashMap("data" -> data))
+    } yield {
+      response.asInstanceOf[HashMap[String, Any]]
+    }
+
+    mayFail recoverWith { case e => tryAgain(e) }
   }
 
   /** Simple command to check if session is alive */
-  def ping: Future[HashMap[String, Any]] = execute("ping", HashMap("value" -> "foo"))
+  def ping: Future[HashMap[String, Any]] =
+    execute("ping", HashMap("value" -> "foo"))
 
   /** Returns key ring of current session */
   def getKeyRing: KeyRing = {
@@ -467,9 +539,7 @@ class Api(
   }
 
   /** Returns cloud storage key used in encryption */
-  def storageKey: Option[SymmetricKey] = {
-    registry.flatMap(_.storageKey)
-  }
+  def storageKey: Option[SymmetricKey] = registry.flatMap(_.storageKey)
 
   /** Tries to register nick with option
     *
@@ -642,7 +712,7 @@ class Api(
               val mayBeParty = parties.get(id)
               mayBeParty.orElse {
                 println(s"creating party without connector for $id, my is $partyId")
-                parties(id) = new Party(self, new Connector(self, HashMap[String, Any]()), HashMap(("partyId", id)))
+                parties(id) = new Party(self, new Connector(self, HashMap[String, Any]()), HashMap(("id", id)))
                 Some(parties(id))
               }
             }
@@ -666,14 +736,13 @@ class Api(
     * @param options     - hashmap contains item's id or tag
     */
   def getItem(
-               constructor: Api => Item,
-               options: HashMap[String, Any]
-             ): Future[Item] = {
+    constructor: Api => Item,
+    options: HashMap[String, Any]
+  ): Future[Item] = {
     val item = constructor(this)
 
     options.get("id") match {
       case Some(id) =>
-        println(s"GET ITEM $id")
         item.loadId(id.asInstanceOf[Int]) map { _ => item }
       case None => options.get("tag") match {
         case Some(tag) => item.loadTag(tag.asInstanceOf[String]) map { _ => item }
@@ -690,6 +759,41 @@ class Api(
     registry match {
       case Some(reg) => reg.setPassword(password).map(_.toJSDictionary)
       case None => throw new ApiError("Registry is not loaded")
+    }
+  }
+
+  def loadItemsEncrypted(options: AnyMap): Future[ListBuffer[AnyMap]] = {
+    val afterSerial = options.getOrElse("afterSerial", null)
+    val beforeSerial = options.getOrElse("beforeSerial", null)
+    var latestSerial = options.getOrElse("latestSerial", null)
+    val tags = options("tags").asInstanceOf[ListBuffer[String]]
+    var limit = options.getOrElse("limit", 100)
+
+    if (latestSerial != null && latestSerial.isInstanceOf[Int]) {
+      limit = latestSerial
+      latestSerial = true
+    }
+
+    val opts = HashMap(
+      ("tags", tags),
+      ("after_serial", afterSerial),
+      ("before_serial", beforeSerial),
+      ("latest_serial", latestSerial),
+      ("limit", limit)
+    )
+
+    def itemsLoad = execute("items_load", opts)
+
+    for {
+      response <- itemsLoad.recoverWith { case anyException => itemsLoad }
+    } yield {
+      response.get("items").asInstanceOf[Option[ListBuffer[AnyMap]]] match {
+        case None => ListBuffer[AnyMap]()
+        case Some(items) => {
+          if (items.isEmpty) ListBuffer[AnyMap]()
+          else items
+        }
+      }
     }
   }
 
@@ -768,7 +872,7 @@ class Api(
       done =>
         i.privateData match {
           case None =>
-            println("decryption error")
+            println(s"item decryption error, $i")
             None
           case Some(data) =>
             if (i.isInstanceOf[Message] && i.priv("type") == "profile")
@@ -801,9 +905,9 @@ class Api(
 
   @JSExport("execute")
   def executeJS(
-                 command: String,
-                 params: js.Dictionary[Any] = js.Dictionary[Any]()
-               ): js.Promise[js.Dictionary[Any]] = execute(command, params)
+    command: String,
+    params: js.Dictionary[Any] = js.Dictionary[Any]()
+  ): js.Promise[js.Dictionary[Any]] = execute(command, params)
 
   @JSExport("getParty")
   def getPartyJS(options: js.Dictionary[Any]): js.Promise[Any] = {
@@ -824,18 +928,17 @@ class Api(
 
   @JSExport("getItem")
   def getItemJS(
-                 constructor: js.Function1[Api, Item],
-                 options: js.Dictionary[Any]
-                 // capsuleSetup: Capsule => Capsule = cap => cap
-               ): js.Promise[Item] = {
-    getItem(constructor, options).toJSPromise
-  }
+    constructor: js.Function1[Api, Item],
+    options: js.Dictionary[Any]
+  ): js.Promise[Item] = getItem(constructor, options).toJSPromise
 
   @JSExport("storageKey")
   def storageKeyJS: AbstractKeyJS = registry.get.storageKeyJS
 
   @JSExport("loadItems")
-  def loadItemsJS(options: js.Dictionary[Any]): js.Promise[js.Array[Item]] = {
+  def loadItemsJS(
+    options: js.Dictionary[Any]
+  ): js.Promise[js.Array[Item]] = {
     loadItems(options)
       .map(_.toJSArray)
       .toJSPromise

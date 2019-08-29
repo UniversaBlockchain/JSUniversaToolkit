@@ -2,44 +2,54 @@ package cloud
 
 import boss._
 import boss.jsany._
+
 import models._
+
 import tools.universa.ImplicitConverters._
 import tools.universa.SHA
 import tools.universa.UniversaTools._
 
-import scala.collection.mutable.{HashMap, ListBuffer}
+import scala.collection.mutable.{ HashMap, ListBuffer }
+
 import scala.scalajs.js
+import scala.scalajs.js.JSON
 import scala.scalajs.js.JSConverters._
-import scala.scalajs.js.annotation.{JSExport, JSExportTopLevel}
+import scala.scalajs.js.annotation.{ JSExport, JSExportTopLevel }
+
 import scala.util.control.Breaks._
 import scala.util.control.NoStackTrace
 
 class EncryptionError(
-  val message: String,
+  val message: String = "CryptoCloud: encryption error",
   val details: HashMap[String, Any] = HashMap[String, Any]()
 ) extends Exception(message) with NoStackTrace {
   @JSExport("message")
   val messageJS = message
 
   @JSExport("details")
-  val detailsJS = details.toJSDictionary
+  val detailsJS = Boss.write(details)
 
-  override def toString: String = s"EncryptionError: $message"
+  override def toString: String = {
+    val detailsJSON = JSON.stringify(Boss.write(details))
+    s"Error: $message, details: $detailsJSON"
+  }
 }
 
 @JSExportTopLevel("CryptoCloud.AuthenticationError")
 class AuthenticationError(
-  override val message: String = "Authentication failed",
+  override val message: String = AuthenticationError.defaultMsg,
   override val details: HashMap[String, Any] = HashMap[String, Any]()
 ) extends EncryptionError(message, details) {}
 
 object AuthenticationError {
+  val defaultMsg = "CryptoCloud: authentication failed"
+
   def apply(message: String, details: HashMap[String, Any]): AuthenticationError = {
     new AuthenticationError(message, details)
   }
 
   def apply(details: HashMap[String, Any]): AuthenticationError = {
-    new AuthenticationError("Authentication failed", details)
+    new AuthenticationError(defaultMsg, details)
   }
 }
 

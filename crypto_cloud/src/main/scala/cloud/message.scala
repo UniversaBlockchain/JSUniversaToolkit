@@ -40,11 +40,10 @@ class Message(override val service: Api) extends Item(service) {
 
   def payload: Option[HashMap[String, Any]] = {
     priv.get("payload") match {
-      case None => {
+      case None =>
         val empty = HashMap[String, Any]()
         setPrivateData("payload", empty)
         Some(empty)
-      }
       case Some(value) => Some(value.asInstanceOf[HashMap[String, Any]])
     }
   }
@@ -132,7 +131,11 @@ class Message(override val service: Api) extends Item(service) {
   /** Packs message to capsule */
   override def toCapsule: Capsule = {
     val cap = super.toCapsule
-    to.foreach(party => cap.addEncryptor(party.publicKey))
+
+    to.foreach(party => {
+      party.publicKey.map { pub => cap.addEncryptor(pub) }
+    })
+
     cap
   }
 }
