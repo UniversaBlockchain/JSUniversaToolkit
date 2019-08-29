@@ -2,80 +2,82 @@ package models.contracts
 
 import boss._
 import boss.jsany._
-import cloud.Api
-import files.{Archive, ArchiveExported, FileBoss, FileInfo}
+import cloud.{ Api, CryptoCloud }
+import files.{ Archive, ArchiveExp, FileBoss, FileInfo, FileInfoExp }
 import models._
 
-import scala.collection.mutable.ListBuffer
+import scala.collection.mutable.{ ListBuffer, HashMap }
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.scalajs.js
 import scala.scalajs.js.JSConverters._
-import scala.scalajs.js.annotation.{JSExportStatic, JSExportTopLevel}
-import scala.util.{Failure, Success}
+import scala.scalajs.js.annotation.{ JSExportStatic, JSExportTopLevel }
+import scala.util.{ Failure, Success }
+
+import tools.universa.UniversaTools._
 
 @JSExportTopLevel("Universa.NotaryContract")
-class NotaryContractExported(override val contract: NotaryContract) extends ContractExported(contract) {
+class NotaryContractExported(
+  override val contract: NotaryContract
+) extends ContractExported(contract) {
   override def templateName = ContractType.NOTARY_CONTRACT.toString
 
-  def addFiles(newFiles: js.Array[FileInfo], api: Api): js.Promise[Double] = {
-    val existingFiles = getExistingFilesInContract()
+  def addFiles(
+    newFilesExp: js.Array[FileInfoExp],
+    attachmentId: Double
+  ): Unit = {
+    val newFiles = newFilesExp.map { file => file.fi }
+    val existingMeta = getFilesMeta() // Seq[FileBoss]
 
-    val newHashes = newFiles.map { file => FileBoss(file) }.toSeq
+    val newMeta = newFiles.map { file => FileBoss(file) }.toSeq
     //we will overwrite files with the same name
-    val existingUniqueFiles = existingFiles.filterNot(ex => newHashes.exists(a => a.fileName == ex.fileName))
+    val existingUniqueMeta = existingMeta.filterNot(ex =>
+      newMeta.exists(a => a.fileName == ex.fileName)
+    )
 
-    val fileBosses = existingUniqueFiles ++ newHashes
-    temp.capsule.setDefinition("data.files", Boss.dump(fileBosses.to[ListBuffer]))
-
-    val existingFilesFuture = contract.filesCloudId
-      .map(id => ArchiveExported.downloadFromCloud(id, api, true).map(_.fileInfos))
-      .getOrElse(Future.successful(js.Array[FileInfo]()))
-
-    existingFilesFuture
-      .map{existingFiles => existingFiles.filter(fileInfo => existingUniqueFiles.exists(_.fileName == fileInfo.name))}
-      .map(leftFiles => leftFiles ++ newFiles)
-      .flatMap(filesToSave => ArchiveExported.uploadToCloud(Archive(filesToSave), api))
-      .andThen {
-        case Failure(t) => println(t)
-        case Success(itemId) =>
-          //save it to contract and storage
-          contract.filesCloudId = Some(itemId)
-          contract.saveOrUpdateContractIds()
-      }
-      .toJSPromise
+    val resultMeta = (existingUniqueMeta ++ newMeta).to[ListBuffer]
+    temp.capsule.setDefinition("data.files", Boss.dump(resultMeta))
+    contract.attachmentId = Some(attachmentId)
   }
 
-  def removeFiles(filesNamesToDelete: js.Array[String], api: Api): js.Promise[Double] = {
-    if (filesNamesToDelete.isEmpty) {
-      return Future.successful(null).toJSPromise
-    }
-
-    val existingFiles = getExistingFilesInContract()
-    val leftFiles = existingFiles.filterNot(ex => filesNamesToDelete.contains(ex.fileName))
-    if (leftFiles.length == existingFiles.length)
-      return Future.failed(new RuntimeException("No files to remove exist in contract")).toJSPromise
-
-    temp.capsule.setDefinition("data.files", Boss.dump(leftFiles.to[ListBuffer]))
-
-    contract.filesCloudId
-      .map(id => ArchiveExported.downloadFromCloud(id, api, true).map(_.fileInfos))
-      .getOrElse(Future.successful(js.Array[FileInfo]()))
-      .map{existingFiles => existingFiles.filter(fileInfo => leftFiles.map(_.fileName).contains(fileInfo.name))}
-      .flatMap(filesToSave => ArchiveExported.uploadToCloud(Archive(filesToSave), api))
-      .andThen {
-        case Failure(t) => println(t)
-        case Success(itemId) =>
-          //save it to contract and storage
-          contract.filesCloudId = Some(itemId)
-          contract.saveOrUpdateContractIds()
-
-      }
-      .toJSPromise
+  def setHolderIdentifier(identifier: String): Unit = {
+    temp.setDefinition("data.holder_identifier", identifier)
+    temp.lockData
   }
 
-  def checkFilesInContract(files: js.Array[FileInfo]): Boolean = {
-    val hashes: Seq[FileBoss] = getExistingFilesInContract()
+  def getHolderIdentifier(): String =
+    temp.getDefinition("data.holder_identifier").asInstanceOf[String]
+
+  // def removeFiles(idsToRemove: js.Array[js.Array[Byte]], api: Api): js.Promise[Double] = {
+  //   val existingMeta = getFilesMeta()
+  //   val ids64 = idsToRemove.map { id => encode64(id) }
+  //   val leftFiles = existingMeta.filterNot(ex => ids64.contains(ex.hashId.base64))
+
+  //   if (leftFiles.length == existingMeta.length)
+  //     return Future.failed(new RuntimeException("No files to remove exist in contract")).toJSPromise
+
+  //   temp.capsule.setDefinition("data.files", Boss.dump(leftFiles.to[ListBuffer]))
+
+  //   contract.attachmentId
+  //     .map(id => ArchiveExp.downloadFromCloud(id, api, true).map(_.files))
+  //     .getOrElse(Future.successful(js.Array[FileInfo]()))
+  //     .map { existingFiles =>
+  //       existingFiles.asInstanceOf[js.Array[FileInfo]].filter(fileInfo =>
+  //         leftFiles.map(_.fileName).contains(fileInfo.name)
+  //       )
+  //     }
+  //     .flatMap(filesToSave => ArchiveExp.uploadToCloud(Archive(filesToSave), api))
+  //     .andThen {
+  //       case Failure(t) => println(t)
+  //       case Success(itemId) =>
+  //         contract.attachmentId = Some(itemId)
+  //     }
+  //     .toJSPromise
+  // }
+
+  def checkFilesInContract(filesExp: js.Array[FileInfoExp]): Boolean = {
+    val files = filesExp.map(_.fi)
+    val hashes: Seq[FileBoss] = getFilesMeta()
 
     if (hashes.length != files.length) return false
     hashes.forall(fh =>
@@ -83,15 +85,12 @@ class NotaryContractExported(override val contract: NotaryContract) extends Cont
     )
   }
 
-  private def getExistingFilesInContract(): Seq[FileBoss] = {
-    Option(temp.capsule.getDefinition("data.files"))
-      .map{str =>
-        val bytes = str.asInstanceOf[Seq[Byte]]
-        Boss.load(bytes).asInstanceOf[Seq[FileBoss]]
-      }
-      .getOrElse(Seq.empty[FileBoss])
+  private def getFilesMeta(): Seq[FileBoss] = {
+    Option(temp.capsule.getDefinition("data.files")).map { str =>
+      val bytes = str.asInstanceOf[Seq[Byte]]
+      Boss.load(bytes).asInstanceOf[Seq[FileBoss]]
+    }.getOrElse(Seq.empty[FileBoss])
   }
-
 }
 
 class NotaryContract(originalPacked: Seq[Byte],
@@ -112,6 +111,16 @@ object NotaryContractExported {
   def create(key: PublicKeyExported, useLongAddress: Boolean): NotaryContractExported = {
     val cap = CapsuleExported.createByKey(key, useLongAddress)
     cap.contract.setDefinitionData("template_name", ContractType.NOTARY_CONTRACT.toString)
+    cap.lockDataAndSign()
+    val contract = NotaryContract(cap)
+    new NotaryContractExported(contract)
+  }
+
+  @JSExportStatic
+  def create(address: String): NotaryContractExported = {
+    val cap = CapsuleExported.createByAddress(decode58(address))
+    cap.contract.setDefinitionData("template_name", ContractType.NOTARY_CONTRACT.toString)
+    cap.lockDataAndSign()
     val contract = NotaryContract(cap)
     new NotaryContractExported(contract)
   }

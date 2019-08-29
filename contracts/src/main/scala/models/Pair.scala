@@ -4,7 +4,7 @@ import boss.jsany._
 import boss.{Boss, BossCase, BossSerializable}
 import cloud.{Api, Item}
 import models.KeyTypes._
-import storage.Storage
+// import storage.Storage
 import tools.universa.UniversaTools
 import tools.universa.UniversaTools._
 import xchange.XChangeAPI
@@ -57,14 +57,7 @@ class Pair(val publicKey: PublicKey,
 
 @JSExportTopLevel("Universa.Pair")
 class PairExported(val pair: Pair) extends CloudElement {
-  def save(): String = {
-    val savedUuid = PairExported.set(uuid, pair)
-    savedUuid
-  }
-
   def name: String = pair.name
-
-  def remove(): Unit = PairExported.remove(uuid)
 
   def setName(newName: String) = {
     pair.name = newName
@@ -109,7 +102,6 @@ class PairExported(val pair: Pair) extends CloudElement {
 }
 
 object PairExported extends CloudFunc[PairExported] {
-  val pairStorage = Storage.pairStorage
   val ItemTag: String = "pair"
 
   @JSExportStatic("fromBOSS")
@@ -120,76 +112,28 @@ object PairExported extends CloudFunc[PairExported] {
 
   @JSExportStatic("FromPrivateKey")
   def apply(privK: PrivateKeyExported): PairExported = {
-    val pair = findInStorageByPrivateKey(privK.privateKey)
-      .getOrElse(new Pair(privK.publicKey.publicKey, Some(privK.privateKey)))
-    new PairExported(pair)
+
+    new PairExported(new Pair(privK.publicKey.publicKey, Some(privK.privateKey)))
   }
 
   @JSExportStatic("FromPublicKey")
   def apply(publicKey: PublicKeyExported): PairExported = {
-    val foundPublic = pairStorage.find(p => p.publicKey.fingerprint == publicKey.fingerprint)
-    val pair = foundPublic.getOrElse(new Pair(publicKey.publicKey))
-    new PairExported(pair)
+    new PairExported(new Pair(publicKey.publicKey))
   }
 
-  private def findInStorageByPrivateKey(privK: PrivateKey): Option[Pair] = {
-    val foundPrivate = pairStorage.find(p => p.privateKey.contains(privK))
-    foundPrivate.orElse {
-      val foundPublic = pairStorage.find(p => p.publicKey.fingerprint == privK.publicKey.fingerprint)
-      foundPublic.map { foundPair =>
-        foundPair.privateKey = Some(privK)
-        pairStorage.set(foundPair.uuid, foundPair)
-        foundPair
-      }
-    }
-  }
-
-  //TODO why we need this in JS????
-  @JSExportStatic("FromPairJs")
-  def pairFromJs(pairJs: PairJS, searchInStorage: Boolean = true): PairExported = {
-    new PairExported(apply(pairJs, true))
-  }
-
-  def apply(pairJs: PairJS, searchInStorage: Boolean = true): Pair = {
+  def apply(pairJs: PairJS): Pair = {
     val pair =
       if (pairJs.keyType == PublicKeyType) {
         val publicKey = PublicKeyExported.fromBOSS(pairJs.key.toJSArray)
 
-        val pairOpt =
-          if (searchInStorage) pairStorage.find(p => p.publicKey == publicKey.publicKey)
-          else None
-        if (pairOpt.isDefined) {
-          val pair = pairOpt.get
-          pair.name = pairJs.name
-          pair.cloudId = Option(pairJs.cloudId).map(_.toDouble)
-          pairStorage.set(pair.uuid, pair)
-          pair
-          //leave createdAt as is
-        } else new Pair(publicKey.publicKey, None, pairJs.name, pairJs.createdAt)
+        new Pair(publicKey.publicKey, None, pairJs.name, pairJs.createdAt)
       } else { //pairJs.keyType == private key
         val privateKey = new PrivateKey(pairJs.key)
-        val pairOpt =
-          if (searchInStorage) findInStorageByPrivateKey(privateKey)
-          else None
-        pairOpt.map { pair =>
-          pair.name = pairJs.name
-          //leave createdAt as is
-          pairStorage.set(pair.uuid, pair)
-          pair.cloudId = Option(pairJs.cloudId).map(_.toDouble)
-          pair
-        }.getOrElse {
-          val pair = new Pair(privateKey.publicKey, Some(privateKey), pairJs.name, pairJs.createdAt)
-          pair.cloudId = Option(pairJs.cloudId).map(_.toDouble)
-          pair
-        }
+        val pair = new Pair(privateKey.publicKey, Some(privateKey), pairJs.name, pairJs.createdAt)
+        pair.cloudId = Option(pairJs.cloudId).map(_.toDouble)
+        pair
       }
     pair
-  }
-
-  @JSExportStatic("FromUuid")
-  def apply(uuid: String): PairExported = {
-    val pair = pairStorage.get(uuid).getOrElse(throw new RuntimeException(s"No object with uuid $uuid found"))
-    new PairExported(pair)
   }
 
   def fromItemOpt(item: Item): Option[PairExported] = {
@@ -205,44 +149,8 @@ object PairExported extends CloudFunc[PairExported] {
     }
   }
 
-  @JSExportStatic("FromLongAddress")
-  def findByLongAddress(longAddress: js.Array[Byte]): Option[PairExported] = {
-    val pairOpt = pairStorage.find(_.publicKey.longAddress == longAddress.toSeq)
-    pairOpt.map(pair => new PairExported(pair))
-  }
-
-  @JSExportStatic("FromShortAddress")
-  def findByShortAddress(shortAddress: js.Array[Byte]): Option[PairExported] = {
-    pairStorage.find(_.publicKey.shortAddress == shortAddress.toSeq)
-      .map(pair => new PairExported(pair))
-  }
-
-  @JSExportStatic("AllPrivatePairsFromStorage")
-  def privates(): js.Array[PairExported] = {
-    val pairs = filter(_.privateKey.isDefined).toJSArray
-    pairs.map(pair => new PairExported(pair))
-  }
-
-  def set(id: String, pair: Pair): String = {
-    pairStorage.set(id, pair)
-    id
-  }
-
   def fromJS(serialized: BossCase): BossSerializable = {
-    apply(serialized.asInstanceOf[PairJS], false)
-  }
-
-  //local storage
-  def filter(predicate: Pair => Boolean): List[Pair] = {
-    pairStorage.filter(predicate)
-  }
-
-  def remove(uuid: String): Unit = {
-    pairStorage.remove(uuid)
-  }
-
-  def exists(uuid: String): Boolean = {
-    pairStorage.get(uuid).isDefined
+    apply(serialized.asInstanceOf[PairJS])
   }
 
   ////////cloud storage

@@ -16,11 +16,10 @@ abstract class Role extends BossSerializable {
 
   def availableForKeys(
     keysToCheck: mutable.Seq[PublicKey],
-    roles: mutable.Seq[Role] = ListBuffer.empty[Role],
-    nestedLevel: Int = 0,
-    long: Boolean = false
+    roles: Seq[Role] = ListBuffer.empty[Role],
+    nestedLevel: Int = 0
   ): Boolean = {
-    availableFor(keysToCheck, mutable.Seq[KeyAddress](), roles, nestedLevel, long)
+    availableFor(keysToCheck, mutable.Seq[KeyAddress](), roles, nestedLevel)
   }
 
   def availableForAddresses(
@@ -34,15 +33,26 @@ abstract class Role extends BossSerializable {
   def availableFor(
     keysToCheck: mutable.Seq[PublicKey],
     addressesToCheck: mutable.Seq[KeyAddress],
-    roles: mutable.Seq[Role] = ListBuffer.empty[Role],
-    nestedLevel: Int = 0,
-    long: Boolean = false
+    roles: Seq[Role] = ListBuffer.empty[Role],
+    nestedLevel: Int = 0
   ): Boolean
 
   def getAddress58(
     long: Boolean = false,
     roles: mutable.Seq[Role] = ListBuffer.empty[Role]
-  ): String
+  ): String = encode58(getAddress(long, roles))
+
+  def getAddress(
+    long: Boolean = false,
+    roles: mutable.Seq[Role] = ListBuffer.empty[Role]
+  ): Seq[Byte]
+
+  def copyWithName(name: String): Role
+
+  def resolve(
+    roles: mutable.Seq[Role] = ListBuffer.empty[Role],
+    nestedLevel: Int = 0
+  ): Role
 }
 
 case class RoleSimpleJS(
@@ -99,6 +109,18 @@ class RoleSimple(val name: String) extends Role {
     this(Boss.load(bossEncoded).asInstanceOf[RoleSimpleJS])
   }
 
+  def copyWithName(newName: String): RoleSimple = {
+    val newRole = new RoleSimple(newName)
+    newRole.keys = keys
+    newRole.addresses = addresses
+    newRole
+  }
+
+  def resolve(
+    roles: mutable.Seq[Role] = ListBuffer.empty[Role],
+    nestedLevel: Int = 0
+  ): Role = this
+
   /** Pack to JS-compatible structure */
   def toJS: RoleSimpleJS = {
     // RoleSimpleJS(name, Some(keys map { k => new KeyRecord(k) }), addresses)
@@ -115,11 +137,10 @@ class RoleSimple(val name: String) extends Role {
   def availableForKeysJS(
                           exportedKeysToCheck: js.Array[PublicKeyExported],
                           roles: js.Array[Role] = js.Array[Role](),
-                          nestedLevel: Int = 0,
-                          long: Boolean = false
+                          nestedLevel: Int = 0
   ): Boolean = {
     val keysToCheck = exportedKeysToCheck.map(_.publicKey)
-    availableForKeys(keysToCheck, roles, nestedLevel, long)
+    availableForKeys(keysToCheck, roles, nestedLevel)
   }
 
   /**
@@ -149,28 +170,29 @@ class RoleSimple(val name: String) extends Role {
     exportedKeysToCheck: js.Array[PublicKeyExported],
     addressesToCheck: mutable.Seq[KeyAddress],
     roles: js.Array[Role] = js.Array[Role](),
-    nestedLevel: Int = 0,
-    long: Boolean = false
+    nestedLevel: Int = 0
   ): Boolean = {
     val keysToCheck = exportedKeysToCheck.map(_.publicKey)
-    availableFor(keysToCheck, addressesToCheck, roles, nestedLevel, long)
+    availableFor(keysToCheck, addressesToCheck, roles, nestedLevel)
   }
 
   override def availableFor(
     keysToCheck: mutable.Seq[PublicKey],
     addressesToCheck: mutable.Seq[KeyAddress],
-    roles: mutable.Seq[Role] = ListBuffer.empty[Role],
-    nestedLevel: Int = 0,
-    long: Boolean = false
+    roles: Seq[Role] = ListBuffer.empty[Role],
+    nestedLevel: Int = 0
   ): Boolean = {
-    if (nestedLevel >= 100) throw new Exception("circular role")
+    // println(s"running availableFor, ${this.name} level $nestedLevel")
+    if (nestedLevel >= 100) throw new Exception(s"circular role ${this.name}")
 
     val prints = keysToCheck map { _.fingerprint }
     val rolePrints = keys map { _.fingerprint }
 
     if (rolePrints.nonEmpty && rolePrints.toSet.subsetOf(prints.toSet)) return true
 
-    val kAddresses = keysToCheck map { k => new KeyAddress(k, long).uaddress }
+    val kAddressesLong = keysToCheck map { k => new KeyAddress(k, true).uaddress }
+    val kAddressesShort = keysToCheck map { k => new KeyAddress(k, false).uaddress }
+    val kAddresses = kAddressesShort ++ kAddressesLong
     val aAddresses = addressesToCheck map { k => k.uaddress }
 
     val localAddresses = addresses map { k => k.uaddress }
@@ -190,9 +212,12 @@ class RoleSimple(val name: String) extends Role {
     list
   }
 
-  def getAddress58(long: Boolean = false, roles: mutable.Seq[Role] = ListBuffer.empty[Role]): String = {
+  def getAddress(
+    long: Boolean = false,
+    roles: mutable.Seq[Role] = ListBuffer.empty[Role]
+  ): Seq[Byte] = {
     val addrs = getRawAddresses(long)
-    encode58(addrs.head)
+    addrs.head
   }
 
   /**
@@ -245,16 +270,29 @@ class RoleLink(val name: String, val targetName: String) extends Role {
   override def availableFor(
                         keysToCheck: mutable.Seq[PublicKey],
                         addressesToCheck: mutable.Seq[KeyAddress],
-                        roles: mutable.Seq[Role] = ListBuffer.empty[Role],
-                        nestedLevel: Int = 0,
-                        long: Boolean = false
+                        roles: Seq[Role] = ListBuffer.empty[Role],
+                        nestedLevel: Int = 0
   ): Boolean = {
-    if (nestedLevel >= 100) throw new Exception("circular role")
+    // println(s"running availableFor, ${this.name} level $nestedLevel")
+    if (nestedLevel >= 100) throw new Exception(s"circular role ${this.name}")
 
     roles
       .find(_.name == targetName)
-      .fold(false)(_.availableFor(keysToCheck, addressesToCheck, roles, nestedLevel + 1, long))
+      .fold(false)(_.availableFor(keysToCheck, addressesToCheck, roles, nestedLevel + 1))
   }
+
+  def resolve(
+    roles: mutable.Seq[Role] = ListBuffer.empty[Role],
+    nestedLevel: Int = 0
+  ): Role = {
+    if (nestedLevel >= 100) throw new Exception(s"circular role ${this.name}")
+
+    val target = roles.find(_.name == targetName)
+    if (target.isEmpty) throw new Exception("Role target not found")
+
+    target.get.resolve(roles, nestedLevel + 1)
+  }
+
 
   /**
    * Check if role is available for given keys
@@ -266,20 +304,21 @@ class RoleLink(val name: String, val targetName: String) extends Role {
   def availableForKeysJS(
                           exportedKeysToCheck: js.Array[PublicKeyExported],
                           roles: js.Array[Role] = js.Array[Role](),
-                          nestedLevel: Int = 0,
-                          long: Boolean = false
+                          nestedLevel: Int = 0
   ): Boolean = {
     val keysToCheck = exportedKeysToCheck.map(_.publicKey)
-    roles.find(_.name == targetName).fold(false)(_.asInstanceOf[RoleSimple].availableForKeys(keysToCheck, roles, nestedLevel + 1, long))
+    roles.find(_.name == targetName).fold(false)(_.asInstanceOf[RoleSimple].availableForKeys(keysToCheck, roles, nestedLevel + 1))
   }
 
-  def getAddress58(
+  def getAddress(
     long: Boolean = false,
     roles: mutable.Seq[Role] = ListBuffer.empty[Role]
-  ): String = {
+  ): Seq[Byte] = {
     val target = roles.find(_.name == targetName).asInstanceOf[Option[Role]]
-    target.get.getAddress58(long, roles)
+    target.get.getAddress(long, roles)
   }
+
+  def copyWithName(newName: String): RoleLink = new RoleLink(newName, targetName)
 }
 
 object RoleLink {
@@ -329,23 +368,33 @@ class RoleList(
   override def availableFor(
                         keysToCheck: mutable.Seq[PublicKey],
                         addressesToCheck: mutable.Seq[KeyAddress],
-                        roles: mutable.Seq[Role] = ListBuffer.empty[Role],
-                        nestedLevel: Int = 0,
-                        long: Boolean = false
+                        allRoles: Seq[Role] = ListBuffer.empty[Role],
+                        nestedLevel: Int = 0
   ): Boolean = {
-    if (nestedLevel >= 100) throw new Exception("circular role")
+    // println(s"running availableFor, ${this.name} level $nestedLevel")
+    if (nestedLevel >= 100) throw new Exception(s"circular role ${this.name}")
 
     mode match {
-      case "ANY" => roles.exists(_.availableFor(keysToCheck, addressesToCheck, roles, nestedLevel + 1, long) == true)
-      case "ALL" => roles.count(_.availableFor(keysToCheck, addressesToCheck, roles, nestedLevel + 1, long) == false) == 0
-      case "QUORUM" => roles.count(_.availableFor(keysToCheck, addressesToCheck, roles, nestedLevel + 1, long) == true) >= quorumSize
+      case "ANY" => roles.exists(_.availableFor(keysToCheck, addressesToCheck, allRoles, nestedLevel + 1) == true)
+      case "ALL" => roles.count(_.availableFor(keysToCheck, addressesToCheck, allRoles, nestedLevel + 1) == false) == 0
+      case "QUORUM" => roles.count(_.availableFor(keysToCheck, addressesToCheck, allRoles, nestedLevel + 1) == true) >= quorumSize
     }
   }
 
-  def getAddress58(
+  def getAddress(
     long: Boolean = false,
     roles: mutable.Seq[Role] = ListBuffer.empty[Role]
-  ): String = ""
+  ): Seq[Byte] = Seq[Byte]()
+
+  def copyWithName(newName: String): RoleList =
+    new RoleList(newName, mode, roles, quorumSize)
+
+  def resolve(
+    allRoles: mutable.Seq[Role] = ListBuffer.empty[Role],
+    nestedLevel: Int = 0
+  ): Role = {
+    new RoleList(name, mode, roles.map(_.resolve(allRoles)))
+  }
 }
 
 object RoleList {

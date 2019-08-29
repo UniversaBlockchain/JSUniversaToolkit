@@ -4,7 +4,6 @@ import boss.jsany._
 import boss.{Boss, BossCase, BossSerializable}
 import cloud.{Api, Item}
 import models._
-import storage.Storage._
 import tools.universa.ImplicitConverters._
 import tools.universa.UniversaTools._
 import xchange.XChangeAPI._
@@ -94,6 +93,14 @@ class OrderExported(val order: Order with AbstractOrderApi) extends CloudElement
 
   def prepare(): js.Promise[JSDict] = order.prepare
 
+  def prepare(address: js.Array[Byte]): js.Promise[JSDict] = {
+    val orderType = order.`type`
+
+    if (orderType == OrderTypes.UTN_U_Type)
+      order.asInstanceOf[UTN_UApi].prepareForAddress(address.toSeq)
+    else throw new RuntimeException(s"method is not available for $orderType order")
+  }
+
   def sign(privateKey: PrivateKeyExported): TransactionPackExported =
     new TransactionPackExported(order.sign(privateKey.privateKey))
 
@@ -104,13 +111,6 @@ class OrderExported(val order: Order with AbstractOrderApi) extends CloudElement
   def orderCode: String = order.orderCode.orNull
 
   def productCode: String = order.productCode.orNull
-
-  def save(): Unit = order.orderCode match {
-    case Some(code) => orderStorage.set(code, order)
-    case None => throw new RuntimeException("Can't save fresh order")
-  }
-
-  def remove(): Unit = order.orderCode.foreach(code => orderStorage.remove(code))
 }
 
 object OrderExported extends CloudFunc[OrderExported] {
@@ -123,7 +123,7 @@ object OrderExported extends CloudFunc[OrderExported] {
 
   @JSExportStatic("createExportByCompound")
   def apply(compoundTP: TransactionPackExported, addr: String): OrderExported = {
-    val tpack = compoundTP.transactionPack
+    val tpack = compoundTP.tp
 
     val order = buildOrder(
       None, None, None, None, None, None,
@@ -135,7 +135,7 @@ object OrderExported extends CloudFunc[OrderExported] {
 
   @JSExportStatic("createUPurchaseByCompound")
   def createUTNU(compoundTP: TransactionPackExported, amount: String): OrderExported = {
-    val tpack = compoundTP.transactionPack
+    val tpack = compoundTP.tp
 
     val order = buildOrder(
       None, None, None, None, None, Some(amount),
@@ -228,18 +228,6 @@ object OrderExported extends CloudFunc[OrderExported] {
         None, None, None, None, compound, orderType
       ) with UTN_UApi
     }
-  }
-
-  @JSExportStatic("find")
-  def apply(orderCode: String): OrderExported = {
-    val order = orderStorage.get(orderCode).getOrElse(throw new ApiError("Order not found"))
-    order.`type` match {
-      case OrderTypes.productType =>
-        new OrderExported(order.asInstanceOf[Order with ProductOrderApi])
-      case OrderTypes.conversionType =>
-        new OrderExported(order.asInstanceOf[Order with ConversionApi])
-    }
-
   }
 
   def apply(orderJS: OrderJS): Order = {

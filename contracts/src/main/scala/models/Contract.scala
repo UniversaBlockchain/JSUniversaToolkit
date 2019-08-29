@@ -5,7 +5,7 @@ import cloud.{Api, Item}
 import models.contracts.{ContractType, _}
 import models.errors.NoKeyError
 import node.{NodeApi, NodeApiExported}
-import storage.Storage._
+// import storage.Storage._
 import tools.universa.ImplicitConverters._
 import tools.universa.SHA
 import tools.universa.UniversaTools._
@@ -88,7 +88,7 @@ class ContractExported(val contract: Contract) extends js.Object {
   def getTransactionPack(): TransactionPackExported =
     new TransactionPackExported(contract.getTransactionPack)
 
-  def updateStorage(): ContractIds = contract.saveOrUpdateContractIds()
+  // def updateStorage(): ContractIds = contract.saveOrUpdateContractIds()
 
   def updateOriginal(): Unit = contract.updateOriginal
 
@@ -101,7 +101,7 @@ class ContractExported(val contract: Contract) extends js.Object {
       "pending" -> contract.pending.map(_.currentBinary.toJSArray).orNull,
       "state" -> contract.state,
       "contractName" -> contract.contractName.orNull,
-      "filesCloudId" -> contract.filesCloudId.getOrElse(null),
+      "attachmentId" -> contract.attachmentId.getOrElse(null),
       "cloudId" -> contract.contractCloudId.getOrElse(null),
       "mainSiblingId" -> contract.mainSiblingId.map(_.composite3.toJSArray).orNull
     ).toJSDictionary
@@ -115,7 +115,7 @@ class ContractExported(val contract: Contract) extends js.Object {
     )
     contract.pending.foreach{p => map.put("pending", p.currentBinary)}
     contract.contractName.foreach(n => map.put("contractName", n))
-    contract.filesCloudId.foreach(c => map.put("filesCloudId", c))
+    contract.attachmentId.foreach(c => map.put("attachmentId", c))
     contract.contractCloudId.foreach(c => map.put("cloudId", c))
     contract.mainSiblingId.foreach(n => map.put("mainSiblingId", n))
     map
@@ -151,10 +151,9 @@ class ContractExported(val contract: Contract) extends js.Object {
                     upack: UPackContractExported,
                     cost: Int,
                     keys: js.Array[PrivateKeyExported],
-                    testMode: Boolean = false,
-                    useLongAddress: Boolean = false
+                    testMode: Boolean = false
                   ): ParcelExported =
-    contract.createParcel(upack.contract, cost, keys.map(_.privateKey), testMode, useLongAddress)
+    contract.createParcel(upack.contract, cost, keys.map(_.privateKey), testMode)
 }
 
 class Contract(
@@ -174,7 +173,7 @@ class Contract(
 
   var state = "DRAFT"
   var contractName: Option[String] = Option(defaultName)
-  var filesCloudId: Option[Double] = None
+  var attachmentId: Option[Double] = None
   var contractCloudId: Option[Double] = None
   var mainSiblingId: Option[HashId] = None
   var errors: ListBuffer[String] = ListBuffer.empty[String]
@@ -218,13 +217,12 @@ class Contract(
                     upack: UPackContract,
                     cost: Int,
                     keys: mutable.Seq[PrivateKey],
-                    testMode: Boolean = false,
-                    useLongAddress: Boolean = false
+                    testMode: Boolean = false
                   ): ParcelExported = {
     if (cost < 1) throw new RuntimeException("cost can't be less than 1 U")
 
     upack.createPayment(cost, testMode)
-    val paymentSignerOpt = upack.original.getKeyForRole("owner", keys, useLongAddress)
+    val paymentSignerOpt = upack.original.getKeyForRole("owner", keys)
     // val contractSignerOpt = temp.getKeyForRole("creator", keys, useLongAddress)
 
     val paymentSigner = paymentSignerOpt.getOrElse(
@@ -253,11 +251,12 @@ class Contract(
     //    println(con2.getBalance(true))
 
     val paymentPack = new TransactionPack(paymentBinary)
-    paymentPack.setItems(ListBuffer(upack.original.currentBinary))
+    paymentPack.setSubItems(upack.original.currentBinary)
 
     val payloadPack = new TransactionPack(payloadBinary)
+
     if (temp.revision > original.revision) {
-      payloadPack.setItems(ListBuffer(original.currentBinary))
+      payloadPack.setSubItems(original.currentBinary)
     }
 
     ParcelExported(payloadPack, paymentPack)
@@ -292,34 +291,34 @@ class Contract(
 
   def isUPack: Boolean = ContractFactory.isUPack(temp)
 
-  def saveOrUpdateContractIds(): ContractIds = {
-    val contractIdsToSave = contractIdsStorage.find(_.uuid == uuid)
-      .map(existingContractIds =>
-        existingContractIds.copy(
-          name = contractName.orNull,
-          original = original.uuid,
-          draft = temp.uuid,
-          pending = pending.map(_.uuid).orNull,
-          filesCloudId = filesCloudId.map(_.toString).orNull))
-      .getOrElse(
-        ContractIds(uuid,
-          contractName.orNull,
-          original.uuid,
-          temp.uuid,
-          pending.map(_.uuid).orNull,
-          filesCloudId.map(_.toString).orNull
-        )
-      )
-    contractIdsStorage.set(uuid, contractIdsToSave)
-    contractIdsToSave
-  }
+  // def saveOrUpdateContractIds(): ContractIds = {
+  //   val contractIdsToSave = contractIdsStorage.find(_.uuid == uuid)
+  //     .map(existingContractIds =>
+  //       existingContractIds.copy(
+  //         name = contractName.orNull,
+  //         original = original.uuid,
+  //         draft = temp.uuid,
+  //         pending = pending.map(_.uuid).orNull,
+  //         attachmentId = attachmentId.map(_.toString).orNull))
+  //     .getOrElse(
+  //       ContractIds(uuid,
+  //         contractName.orNull,
+  //         original.uuid,
+  //         temp.uuid,
+  //         pending.map(_.uuid).orNull,
+  //         attachmentId.map(_.toString).orNull
+  //       )
+  //     )
+  //   contractIdsStorage.set(uuid, contractIdsToSave)
+  //   contractIdsToSave
+  // }
 
-  def saveAllToStorage(): ContractIds = {
-    ContractExported.saveDraftVersion(this.uuid, this.temp.originalBinary.toJSArray)
-    ContractExported.saveOriginalVersion(this.uuid, this.original.originalBinary.toJSArray)
-    this.pending.foreach(p => ContractExported.savePendingVersion(this.uuid, p.originalBinary.toJSArray))
-    saveOrUpdateContractIds()
-  }
+  // def saveAllToStorage(): ContractIds = {
+  //   ContractExported.saveDraftVersion(this.uuid, this.temp.originalBinary.toJSArray)
+  //   ContractExported.saveOriginalVersion(this.uuid, this.original.originalBinary.toJSArray)
+  //   this.pending.foreach(p => ContractExported.savePendingVersion(this.uuid, p.originalBinary.toJSArray))
+  //   saveOrUpdateContractIds()
+  // }
 
   def walletID(useLongAddress: Boolean = false): String = {
     temp.getSplitJoin match {
@@ -381,13 +380,13 @@ object ContractExported {
 
     val state = map("state").asInstanceOf[String]
     val contractName = map.get("contractName").flatMap(Option(_)).map(_.asInstanceOf[String])
-    val filesCloudId = map.get("filesCloudId").flatMap(Option(_)).map(_.asInstanceOf[Double])
+    val attachmentId = map.get("attachmentId").flatMap(Option(_)).map(_.asInstanceOf[Double])
     val cloudId = map.get("cloudId").flatMap(Option(_)).map(_.asInstanceOf[Double])
 
     val contract = ContractFactory.buildFromBytes(original, Some(temp), pending)
     contract.state = state
     contract.contractName = contractName
-    contract.filesCloudId = filesCloudId
+    contract.attachmentId = attachmentId
     contract.contractCloudId = cloudId
     if (usingBoss) {
       val mainSiblingId = map.get("mainSiblingId").flatMap(Option(_)).map(_.asInstanceOf[HashId])
@@ -498,47 +497,71 @@ object ContractExported {
   val PendingUuid = "pending"
 
 
-  @JSExportStatic("findById")
-  def findContractId(contractId: String): ContractIds = {
-    contractIdsStorage.find {
-      _.isIdHere(contractId)
-    }.orNull
+  // @JSExportStatic("findById")
+  // def findContractId(contractId: String): ContractIds = {
+  //   contractIdsStorage.find {
+  //     _.isIdHere(contractId)
+  //   }.orNull
+  // }
+
+  // @JSExportStatic("setOriginal")
+  // def saveOriginalVersion(contractId: String, binary: js.Array[Byte]): Unit = {
+  //   contractBinaryStorage.set(OriginalUuid + contractId, ContractBinary(binary))
+  // }
+
+  // @JSExportStatic("setDraft")
+  // def saveDraftVersion(contractId: String, binary: js.Array[Byte]): Unit = {
+  //   contractBinaryStorage.set(DraftUuid + contractId, ContractBinary(binary))
+  // }
+
+  // @JSExportStatic("setPending")
+  // def savePendingVersion(contractId: String, binary: js.Array[Byte]): Unit = {
+  //   contractBinaryStorage.set(PendingUuid + contractId, ContractBinary(binary))
+  // }
+
+  // @JSExportStatic("getOriginal")
+  // def getOriginalVersion(contractId: String): Option[js.Array[Byte]] = {
+  //   getVersion(OriginalUuid, contractId)
+  // }
+
+  // @JSExportStatic("getDraft")
+  // def getDraftVersion(contractId: String): Option[js.Array[Byte]] = {
+  //   getVersion(DraftUuid, contractId)
+  // }
+
+  // @JSExportStatic("getPending")
+  // def getPendingVersion(contractId: String): Option[js.Array[Byte]] = {
+  //   getVersion(PendingUuid, contractId)
+  // }
+
+  @JSExportStatic("jsonWalletID")
+  def getWalletID(options: js.Dictionary[Any]): String = {
+    val params: mutable.Map[String, Any] = options
+    val id = params("id").asInstanceOf[String]
+    val isMintable = params("is_mintable").asInstanceOf[Boolean]
+
+    if (isMintable) {
+      val issuer64 = params("issuer").asInstanceOf[String]
+      val issuer58 = encode58(decode64(issuer64))
+      val hash = ListBuffer(id, issuer58).mkString
+      encode64(new SHA(256).get(hash))
+    } else {
+      val origin = params("origin").asInstanceOf[String]
+      val hash = ListBuffer(decode64(origin)).mkString
+      encode64(new SHA(256).get(hash))
+    }
   }
 
-  @JSExportStatic("setOriginal")
-  def saveOriginalVersion(contractId: String, binary: js.Array[Byte]): Unit = {
-    contractBinaryStorage.set(OriginalUuid + contractId, ContractBinary(binary))
+  @JSExportStatic("fromCapsule")
+  def buildFromCapsule(cap: CapsuleExported): ContractExported = {
+    val contract = ContractFactory.buildFromCapsule(cap.capsule)
+    contract.toExport()
   }
 
-  @JSExportStatic("setDraft")
-  def saveDraftVersion(contractId: String, binary: js.Array[Byte]): Unit = {
-    contractBinaryStorage.set(DraftUuid + contractId, ContractBinary(binary))
-  }
-
-  @JSExportStatic("setPending")
-  def savePendingVersion(contractId: String, binary: js.Array[Byte]): Unit = {
-    contractBinaryStorage.set(PendingUuid + contractId, ContractBinary(binary))
-  }
-
-  @JSExportStatic("getOriginal")
-  def getOriginalVersion(contractId: String): Option[js.Array[Byte]] = {
-    getVersion(OriginalUuid, contractId)
-  }
-
-  @JSExportStatic("getDraft")
-  def getDraftVersion(contractId: String): Option[js.Array[Byte]] = {
-    getVersion(DraftUuid, contractId)
-  }
-
-  @JSExportStatic("getPending")
-  def getPendingVersion(contractId: String): Option[js.Array[Byte]] = {
-    getVersion(PendingUuid, contractId)
-  }
-
-  private def getVersion(uuid: String, contractId: String): Option[js.Array[Byte]] = {
-    val contractBinOpt = contractBinaryStorage.get(uuid + contractId)
-    contractBinOpt.map(_.binary.toJSArray)
-  }
+  // private def getVersion(uuid: String, contractId: String): Option[js.Array[Byte]] = {
+  //   val contractBinOpt = contractBinaryStorage.get(uuid + contractId)
+  //   contractBinOpt.map(_.binary.toJSArray)
+  // }
 }
 
 //binary
@@ -556,7 +579,7 @@ case class ContractIds(
   original: String,
   draft: String,
   pending: String,
-  filesCloudId: String
+  attachmentId: String
 ) extends BossSerializable {
 
   def isIdHere(contractId: String): Boolean = {
@@ -570,7 +593,7 @@ case class ContractIds(
       original,
       draft,
       pending,
-      filesCloudId)
+      attachmentId)
 }
 
 case class ContractIdsJS(uuid: String,
@@ -578,7 +601,7 @@ case class ContractIdsJS(uuid: String,
                          original: String,
                          draft: String,
                          pending: String,
-                         filesCloudId: String)
+                         attachmentId: String)
   extends BossCase
 
 //helper
@@ -596,7 +619,7 @@ object ContractBossConverter {
       jsClass.original,
       jsClass.draft,
       jsClass.pending,
-      jsClass.filesCloudId
+      jsClass.attachmentId
     )
   }
 }

@@ -66,6 +66,11 @@ object PKI extends js.Object {
   def pbkdf2(hash: SHA, options: js.Dictionary[Any]): js.Array[Byte] = js.native
 }
 
+@js.native
+@JSGlobal("Universa.pki.extendedSignature")
+object ExtendedSignatureJS extends js.Object {
+  def verify(pubKey: models._PublicKey, signature: js.Array[Byte], data: js.Array[Byte]): js.Any = js.native
+}
 
 @js.native
 @JSGlobal("Universa.utils.v2")
@@ -87,6 +92,18 @@ object UniversaToolsJS extends js.Object {
 }
 
 object UniversaTools {
+  def verifyExtended(key: models.PublicKey, signature: Seq[Byte], data: Seq[Byte]): Boolean = {
+    var exts :js.Any = null
+
+    try {
+      exts = ExtendedSignatureJS.verify(key.key, signature.toJSArray, data.toJSArray)
+    } catch {
+      case e: js.JavaScriptException => //println(e)
+    }
+
+    return !(exts eq null)
+  }
+
   @JSExportTopLevel("Universa.tools.encode64")
   def encode64JS(bytes: js.Array[Byte]): String = encode64(bytes.toSeq)
   def encode64(bytes: Seq[Byte]): String = UniversaToolsJS.encode64(bytes.toJSArray)

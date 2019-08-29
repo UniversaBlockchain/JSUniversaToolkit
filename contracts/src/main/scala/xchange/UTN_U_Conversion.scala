@@ -4,7 +4,7 @@ import boss._
 import boss.jsany._
 import models.{Contract, Capsule, PrivateKey, TransactionPack}
 import models.contracts.ContractFactory
-import tools.universa.UniversaTools.{decode64, encode64}
+import tools.universa.UniversaTools.{ decode64, encode64, decode58, encode58 }
 import xchange.XChangeAPI.{Dict, request}
 
 import scala.collection.mutable
@@ -57,8 +57,16 @@ trait UTN_UApi extends AbstractOrderApi {
     val utnRoles = utnCapsule.getRoles.values.toSeq
     val owner = utnCapsule.getRole("owner").get
 
+    prepareForAddress(owner.getAddress(false, mutable.Seq(utnRoles: _*)))
+  }
+
+  def prepareForAddress(address: Seq[Byte]): Future[Dict] = {
+    val utnCapsule = new Capsule(compound.get)
+    val utnContract = ContractFactory.buildFromCapsule(utnCapsule)
+    val utnTransaction = utnContract.getTransactionPack
+
     val params = HashMap[String, Any](
-      ("owner_address", owner.getAddress58(false, mutable.Seq(utnRoles: _*))),
+      ("owner_address", encode58(address)),
       ("amount", amount.get.toInt),
       ("utn_base64", encode64(utnTransaction.toBOSS))
     )
@@ -79,7 +87,7 @@ trait UTN_UApi extends AbstractOrderApi {
 
   override def sign(privateKey: PrivateKey): TransactionPack = {
     val tpack = Boss.load(compound.get).asInstanceOf[TransactionPack]
-    val cap = tpack.mainContract.original
+    val cap = tpack.mainCapsule
     cap.sign(privateKey)
     cap.lock
     tpack.contract = cap.currentBinary

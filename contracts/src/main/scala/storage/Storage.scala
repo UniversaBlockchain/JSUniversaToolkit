@@ -98,10 +98,10 @@ class Storage[A <: BossSerializable : ClassTag]() {
 }
 
 object Storage {
-  val pairStorage = new Storage[models.Pair]
-  val orderStorage = new Storage[xchange.Order]
+  // val pairStorage = new Storage[models.Pair]
+  // val orderStorage = new Storage[xchange.Order]
   val timeStorage = new Storage[LocalTimeDifference]()
 
-  val contractBinaryStorage = new Storage[ContractBinary]()
-  val contractIdsStorage = new Storage[ContractIds]()
+  // val contractBinaryStorage = new Storage[ContractBinary]()
+  // val contractIdsStorage = new Storage[ContractIds]()
 }

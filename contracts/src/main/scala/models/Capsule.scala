@@ -37,8 +37,9 @@ class UniversaContract (
     loaded.transactional
   )
 
-  def toJS: UniversaContractJS =
+  def toJS: UniversaContractJS = {
     UniversaContractJS(apiLevel, definition, state, transactional)
+  }
 
   def revision: Int = state("revision").asInstanceOf[Int]
   def setRevision(rev: Int): Unit = state("revision") = rev
@@ -139,27 +140,32 @@ class UniversaContract (
     state("parent") = id
 
   def getRoles: HashMap[String, Role] = {
-    val rolesDict = HashMap[String, Role]()
+    val roles = HashMap[String, Role]()
 
-    rolesDict += ("issuer" -> get("definition.issuer").asInstanceOf[Role])
-    rolesDict += ("owner" -> get("state.owner").asInstanceOf[Role])
-    rolesDict += ("creator" -> get("state.created_by").asInstanceOf[Role])
+    UniversaContract.mainRoles.map(path => {
+      val role = getMainRole(path)
+      roles += (role.name -> role)
+    })
 
-    val definitionRoles = definition.get("roles") match {
-      case None => ListBuffer[Role]()
-      case Some(list) => list.asInstanceOf[ListBuffer[Role]]
-    }
+    ListBuffer(definition, state).map(section => {
+      if (!section.get("roles").isEmpty) {
+        val rolesValue = section("roles")
 
-    val stateRoles = state.get("roles") match {
-      case None => ListBuffer[Role]()
-      case Some(list) => list.asInstanceOf[ListBuffer[Role]]
-    }
+        if (rolesValue.isInstanceOf[ListBuffer[_ <: Any]]) {
+          rolesValue.asInstanceOf[ListBuffer[Role]].map(
+            r => roles += (r.name -> r)
+          )
+        } else {
+          roles ++= rolesValue.asInstanceOf[HashMap[String, Role]]
+        }
+      }
+    })
 
-    definitionRoles.map(r => rolesDict += (r.name -> r))
-    stateRoles.map(r => rolesDict += (r.name -> r))
-
-    rolesDict
+    roles
   }
+
+  private def getMainRole(path: String): Role =
+    get(path).asInstanceOf[Role]
 
   def getRole(name: String): Option[Role] =
     //protection from Role = null
@@ -167,19 +173,34 @@ class UniversaContract (
 }
 
 object UniversaContract {
+  val mainRoles = ListBuffer(
+    "definition.issuer",
+    "state.owner",
+    "state.created_by"
+  )
+
   def fromJS(serialized: BossCase): BossSerializable =
     new UniversaContract(serialized.asInstanceOf[UniversaContractJS])
 
   def apply(key: PublicKey, useLongAddress: Boolean): UniversaContract = {
     val issuer = new RoleSimple("issuer", key, useLongAddress)
+    apply(issuer)
+  }
+
+  def apply(address: Seq[Byte]): UniversaContract = {
+    val issuer = new RoleSimple("issuer", new KeyAddress(address))
+    apply(issuer)
+  }
+
+  def apply(issuer: Role): UniversaContract = {
     val owner = new RoleLink("owner", "issuer")
     val creator = new RoleLink("creator", "issuer")
-    val apiLevel = 3
+    val apiLevel = 4
 
     val createdAt = XChangeAPI.getNetworkJsDate()
     val expiresAt = new js.Date(createdAt.getTime)
-    // expiresAt.setFullYear(expiresAt.getFullYear() + 5)
-    expiresAt.setMonth(expiresAt.getMonth() + 3)
+    expiresAt.setFullYear(expiresAt.getFullYear() + 5)
+    // expiresAt.setMonth(expiresAt.getMonth() + 3)
 
     val revoke = new RevokePermission("owner")
     val permissions = HashMap((revoke.id, revoke))
@@ -198,6 +219,7 @@ object UniversaContract {
       ("expires_at", expiresAt),
       ("data", HashMap[String, Any]())
     ).asInstanceOf[HashMap[String, Any]]
+
     new UniversaContract(apiLevel, definition, state, null)
   }
 }
@@ -247,24 +269,24 @@ class CapsuleExported(val capsule: Capsule) extends js.Object {
 
   def getRole(name: String): Role = capsule.getRole(name).orNull
 
-  def getRolesForPublicKey(key: PublicKeyExported): js.Array[Role] = {
-    capsule.getRolesForPublicKey(key.publicKey).toJSArray
-  }
+  // def getRolesForPublicKey(key: PublicKeyExported): js.Array[Role] = {
+  //   capsule.getRolesForPublicKey(key.publicKey).toJSArray
+  // }
 
-  def getRolesForPair(pair: PairExported): js.Array[Role] = {
-    capsule.getRolesForPair(pair.pair).toJSArray
-  }
+  // def getRolesForPair(pair: PairExported): js.Array[Role] = {
+  //   capsule.getRolesForPair(pair.pair).toJSArray
+  // }
 
-  def getRolesForUAddress(uaddress: js.Array[Byte]): js.Array[Role] = {
-    capsule.getRolesForUAddress(uaddress.toSeq).toJSArray
-  }
+  // def getRolesForUAddress(uaddress: js.Array[Byte]): js.Array[Role] = {
+  //   capsule.getRolesForUAddress(uaddress.toSeq).toJSArray
+  // }
 
-  def getRolesForKeyAddress(address: KeyAddress): js.Array[Role] = {
-    capsule.getRolesForKeyAddress(address).toJSArray
-  }
+  // def getRolesForKeyAddress(address: KeyAddress): js.Array[Role] = {
+  //   capsule.getRolesForKeyAddress(address).toJSArray
+  // }
 
   def getInfo(): js.Dictionary[_] = {
-    val result = capsule.getPublicKeysWithRoles
+    val result = capsule.signaturesInfo
     js.Dictionary(
       "publicKeys" -> result._1.map(pk => new PublicKeyExported(pk)).toJSArray,
       "roles" -> result._2.toJSArray
@@ -272,16 +294,14 @@ class CapsuleExported(val capsule: Capsule) extends js.Object {
   }
 
   def isSignedBy(publicKey: PublicKeyExported): Boolean = {
-    val addrs = capsule.getPublicKeysWithRoles._1.map(_.shortAddress)
+    val addrs = capsule.signaturesInfo._1.map(_.shortAddress)
     addrs.contains(publicKey.publicKey.shortAddress)
   }
 
   def isRoleAvailable(roleName: String, publicKeys: js.Array[PublicKeyExported]): Boolean = {
     val role = getRole(roleName)
     Option(role).fold(false) { r =>
-      val checkShort = r.availableForKeys(publicKeys.map(_.publicKey), getRolesList(), 0, false)
-      val checkLong = r.availableForKeys(publicKeys.map(_.publicKey), getRolesList(), 0, true)
-      checkShort || checkLong
+      r.availableForKeys(publicKeys.map(_.publicKey), getRolesList(), 0)
     }
   }
 
@@ -291,6 +311,10 @@ class CapsuleExported(val capsule: Capsule) extends js.Object {
 
   def getPermissions(): js.Dictionary[js.Dictionary[Any]] = {
     capsule.contract.getAllPermissions().map{case (k, v) => (v.name, v.getParams())}.toJSDictionary
+  }
+
+  def setTTL(amount: Int, unit: String): Unit = {
+    capsule.setTTL(amount, unit)
   }
 }
 
@@ -323,7 +347,18 @@ class Capsule(val originalBinary: Seq[Byte]) {
   def getField(path: String): Any = contract.get(path)
   def setDefinition(path: String, value: Any): Unit = contract.set(s"definition.$path", value)
   def setState(path: String, value: Any): Unit = contract.set(s"state.$path", value)
-  def setTransactional(path: String, value: Any): Unit = contract.set(s"transactional.$path", value)
+  def setTransactional(path: String, value: Any): Unit = {
+    if (contract.transactional == null) contract.transactional = HashMap[String, Any]()
+    contract.set(s"transactional.$path", value)
+  }
+  def getTransactional(path: String): Any = contract.get(s"transactional.$path")
+  def addReference(ref: Reference): Unit = {
+    var references = getTransactional("references").asInstanceOf[ListBuffer[Reference]]
+    if (references == null) references = ListBuffer[Reference]()
+
+    references += ref
+    setTransactional("references", references)
+  }
 
   def copyAsRoot: Capsule = {
     val cap = new Capsule(currentBinary)
@@ -357,11 +392,18 @@ class Capsule(val originalBinary: Seq[Byte]) {
     lock()
   }
 
+  def resetSignatures: Unit = {
+    signatures = ListBuffer[Seq[Byte]]()
+    lock
+  }
+
   lazy val hashId: HashId = HashId(originalBinary)
   lazy val uuid = hashId.base64
   def currentHashId: HashId = HashId(currentBinary)
 
   def sign(key: PrivateKey): Unit = signatures += key.signExtended(packedData)
+  def sign(keys: Seq[PrivateKey]): Unit =
+    keys.foreach(key => signatures += key.signExtended(packedData))
 
   def this(encoded: js.Array[Byte]) = this(encoded.toSeq)
 
@@ -392,6 +434,14 @@ class Capsule(val originalBinary: Seq[Byte]) {
   def setCreatorLink(roleName: String): Unit =
     contract.set("state.created_by", new RoleLink("creator", roleName))
 
+  def setOwner(address: KeyAddress): Unit = {
+    setState("owner", new RoleSimple("owner", address))
+  }
+
+  def setOwner(key: PublicKey): Unit = {
+    setState("owner", new RoleSimple("owner", key))
+  }
+
   def setOrigin(capsuleBinary: Seq[Byte]): Unit =
     contract.setOrigin(capsuleBinary)
 
@@ -405,18 +455,33 @@ class Capsule(val originalBinary: Seq[Byte]) {
     revokingIds = contracts.map(_.original.currentHashId)
   }
 
+  def resetRevokingContracts: Unit = revokingIds = ListBuffer[HashId]()
+  def resetNewContracts: Unit = newIds = ListBuffer[HashId]()
+
   def setNewContracts(contracts: ListBuffer[Contract]): Unit = {
     newIds = contracts.map(_.original.currentHashId)
+  }
+
+  def addNewCapsules(capsules: ListBuffer[Capsule]): Unit = {
+    newIds ++= capsules.map(_.currentHashId)
   }
 
   def getRoles: HashMap[String, Role] = contract.getRoles
 
   def getRole(name: String): Option[Role] = contract.getRole(name)
 
+  def getFinalRole(name: String): Role = {
+    var finalRole = getRole(name).get
+
+    while (finalRole.isInstanceOf[RoleLink])
+      finalRole = getRole(finalRole.asInstanceOf[RoleLink].targetName).get
+
+    finalRole
+  }
+
   def getKeyForRole(
     roleName: String,
-    privateKeys: mutable.Seq[PrivateKey],
-    useLongAddress: Boolean = false
+    privateKeys: mutable.Seq[PrivateKey]
   ): Option[PrivateKey] = {
     val rolesList = getRoles.values.toSeq
     val roles = mutable.Seq[Role](rolesList: _*)
@@ -425,28 +490,28 @@ class Capsule(val originalBinary: Seq[Byte]) {
     roleOpt match {
       case None => throw new NoRoleError(s"There's no role $roleName in contract")
       case Some(role) =>
-        privateKeys.find(k => role.availableForKeys(ListBuffer(k.publicKey), roles, 0, useLongAddress))
+        privateKeys.find(k => role.availableForKeys(ListBuffer(k.publicKey), roles, 0))
     }
   }
 
-  def getRolesForPublicKey(key: PublicKey): Seq[Role] = {
-    val keys = mutable.Seq[PublicKey](key)
-    val allRoles = getRoles.values.toSeq
-    allRoles.filter(v => v.availableForKeys(keys, mutable.Seq(allRoles: _*)))
-  }
+  // def getRolesForPublicKey(key: PublicKey): Seq[Role] = {
+  //   val keys = mutable.Seq[PublicKey](key)
+  //   val allRoles = getRoles.values.toSeq
+  //   allRoles.filter(v => v.availableForKeys(keys, mutable.Seq(allRoles: _*)))
+  // }
 
-  def getRolesForPair(pair: Pair): Seq[Role] = {
-    getRolesForPublicKey(pair.publicKey).toJSArray
-  }
+  // def getRolesForPair(pair: Pair): Seq[Role] = {
+  //   getRolesForPublicKey(pair.publicKey).toJSArray
+  // }
 
-  def getRolesForUAddress(uaddress: Seq[Byte]): Seq[Role] = {
-    getRolesForKeyAddress(new KeyAddress(uaddress))
-  }
+  // def getRolesForUAddress(uaddress: Seq[Byte]): Seq[Role] = {
+  //   getRolesForKeyAddress(new KeyAddress(uaddress))
+  // }
 
-  def getRolesForKeyAddress(address: KeyAddress): Seq[Role] = {
-    val addresses = mutable.Seq[KeyAddress](address)
-    getRoles.values.toSeq.filter(v => v.availableFor(mutable.Seq.empty[PublicKey], addresses))
-  }
+  // def getRolesForKeyAddress(address: KeyAddress): Seq[Role] = {
+  //   val addresses = mutable.Seq[KeyAddress](address)
+  //   getRoles.values.toSeq.filter(v => v.availableFor(mutable.Seq.empty[PublicKey], addresses))
+  // }
 
   def getPublicKeys: Seq[PublicKey] = {
     signatures
@@ -457,11 +522,11 @@ class Capsule(val originalBinary: Seq[Byte]) {
       .force
   }
 
-  def getPublicKeysWithRoles: (Seq[PublicKey], Seq[Role]) = {
-    val keys = getPublicKeys
-    val roles = keys.flatMap(key => getRolesForPublicKey(key))
-    (keys, roles)
-  }
+  // def getPublicKeysWithRoles: (Seq[PublicKey], Seq[Role]) = {
+  //   val keys = getPublicKeys
+  //   val roles = keys.flatMap(key => getRolesForPublicKey(key))
+  //   (keys, roles)
+  // }
 
   def copy(): Capsule = new Capsule(currentBinary)
 
@@ -470,6 +535,10 @@ class Capsule(val originalBinary: Seq[Byte]) {
 
   def resetTransactional: Unit = {
     contract.transactional = null
+  }
+
+  def clearTransactional: Unit = {
+    contract.transactional = HashMap[String, Any]()
   }
 
   def getAmount: BigDecimal = {
@@ -497,6 +566,84 @@ class Capsule(val originalBinary: Seq[Byte]) {
     else setDefinition(path, role)
   }
 
+  def signaturesInfo: (Seq[PublicKey], Seq[Role]) = {
+    // FIXME: useless conversion
+    val keys = getPublicKeys.asInstanceOf[mutable.Seq[PublicKey]]
+    val rolesList = getRoles.values.toSeq
+    val rolesSigned = rolesList.filter(v =>
+      v.availableFor(keys, mutable.Seq[KeyAddress](), rolesList)
+    )
+    (keys, rolesSigned)
+  }
+
+  def setTTL(amount: Int, unit: String): Unit = {
+    val createdAt = getDefinition("created_at").asInstanceOf[js.Date]
+    val expiresAt = new js.Date(createdAt.getTime)
+    if (unit == "month")
+      expiresAt.setMonth(expiresAt.getMonth() + amount)
+
+    if (unit == "year")
+      expiresAt.setFullYear(expiresAt.getFullYear() + amount)
+
+    if (unit == "day")
+      expiresAt.setDate(expiresAt.getDate() + amount)
+
+    setState("expires_at", expiresAt)
+  }
+
+}
+
+object Capsule {
+  def apply(publicKey: PublicKey, useLongAddress: Boolean = false): Capsule = {
+    val data = Boss.dump(HashMap(
+      ("new", ListBuffer[Seq[Byte]]()),
+      ("revoking", ListBuffer[Seq[Byte]]()),
+      ("contract", UniversaContract(publicKey, useLongAddress))
+    ))
+
+    val packedCapsule = Boss.dump(HashMap(
+      ("type", "unicapsule"),
+      ("version", 4),
+      ("data", data),
+      ("signatures", ListBuffer[Seq[Byte]]())
+    ))
+
+    new Capsule(packedCapsule)
+  }
+
+  def apply(address: Seq[Byte]): Capsule = {
+    val data = Boss.dump(HashMap(
+      ("new", ListBuffer[Seq[Byte]]()),
+      ("revoking", ListBuffer[Seq[Byte]]()),
+      ("contract", UniversaContract(address))
+    ))
+
+    val packedCapsule = Boss.dump(HashMap(
+      ("type", "unicapsule"),
+      ("version", 4),
+      ("data", data),
+      ("signatures", ListBuffer[Seq[Byte]]())
+    ))
+
+    new Capsule(packedCapsule)
+  }
+
+   def apply(role: Role): Capsule = {
+    val data = Boss.dump(HashMap(
+      ("new", ListBuffer[Seq[Byte]]()),
+      ("revoking", ListBuffer[Seq[Byte]]()),
+      ("contract", UniversaContract(role.copyWithName("issuer")))
+    ))
+
+    val packedCapsule = Boss.dump(HashMap(
+      ("type", "unicapsule"),
+      ("version", 4),
+      ("data", data),
+      ("signatures", ListBuffer[Seq[Byte]]())
+    ))
+
+    new Capsule(packedCapsule)
+  }
 }
 
 object CapsuleExported {
@@ -506,8 +653,6 @@ object CapsuleExported {
       case None => amount
       case Some(minUnit) =>
         val minUnitScale = minUnit.scale
-//        val amountScale = amount.scale
-//        val maxScale = Math.max(minUnitScale, amountScale)
         val maxScale18 = Math.min(18, minUnitScale)
         val maxPrecision = Math.pow(10, maxScale18).toLong
 
@@ -550,7 +695,24 @@ object CapsuleExported {
 
     val packedCapsule = Boss.dump(HashMap(
       ("type", "unicapsule"),
-      ("version", 3),
+      ("version", 4),
+      ("data", data),
+      ("signatures", ListBuffer[Seq[Byte]]())
+    ))
+
+    new Capsule(packedCapsule)
+  }
+
+  def createByAddress(address: Seq[Byte]): Capsule = {
+    val data = Boss.dump(HashMap(
+      ("new", ListBuffer[Seq[Byte]]()),
+      ("revoking", ListBuffer[Seq[Byte]]()),
+      ("contract", UniversaContract(address))
+    ))
+
+    val packedCapsule = Boss.dump(HashMap(
+      ("type", "unicapsule"),
+      ("version", 4),
       ("data", data),
       ("signatures", ListBuffer[Seq[Byte]]())
     ))

@@ -7,7 +7,7 @@ import tools.universa.SHA
 import tools.universa.UniversaTools._
 
 import scala.collection.mutable
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{ HashMap }
 import scala.scalajs.js
 import scala.scalajs.js.JSConverters._
 import scala.scalajs.js.annotation.{JSExportStatic, JSExportTopLevel, JSGlobal}
@@ -64,7 +64,7 @@ class PublicKeyExported(val publicKey: PublicKey) extends AbstractKeyJS {
 }
 
 
-class PublicKey(key: _PublicKey) extends BossSerializable with AbstractKey {
+class PublicKey(val key: _PublicKey) extends BossSerializable with AbstractKey {
   /** Pack to BOSS (without type property) */
   def toBOSSLite: Seq[Byte] = key.pack("BOSS")
 
@@ -91,6 +91,12 @@ class PublicKey(key: _PublicKey) extends BossSerializable with AbstractKey {
   def shortAddress: Seq[Byte] = key.shortAddress()
 
   def longAddress: Seq[Byte] = key.longAddress()
+
+  def isMatchingAddress(addr: Seq[Byte]): Boolean =
+    isMatchingAddress(encode58(addr))
+
+  def isMatchingAddress(addr: String): Boolean =
+    List(shortAddress, longAddress).map(encode58(_)).contains(addr)
 
   /** Encrypts binary data
     *
@@ -130,6 +136,10 @@ class PublicKey(key: _PublicKey) extends BossSerializable with AbstractKey {
 
     key.verify(data.toJSArray, signature.toJSArray, options.toJSDictionary)
   }
+
+  def verifyExt(signature: Seq[Byte], data: Seq[Byte]): Boolean = {
+    verifyExtended(this, signature, data)
+  }
 }
 
 object PublicKeyExported {
@@ -139,9 +149,13 @@ object PublicKeyExported {
 
   @JSExportStatic("fromBOSS")
   def fromBOSS(bossEncoded: js.Array[Byte]): PublicKeyExported = {
-//    val packed = Boss.load(bossEncoded).asInstanceOf[PublicKeyJS].packed.toJSArray
-//    new PublicKey(new _PublicKey("BOSS", packed))
     val pk = Boss.load(bossEncoded).asInstanceOf[PublicKey]
+    new PublicKeyExported(pk)
+  }
+
+  @JSExportStatic("fromPlain")
+  def fromPlain(plainEncoded: js.Array[Byte]): PublicKeyExported = {
+    val pk = new PublicKey(plainEncoded.toSeq)
     new PublicKeyExported(pk)
   }
 }

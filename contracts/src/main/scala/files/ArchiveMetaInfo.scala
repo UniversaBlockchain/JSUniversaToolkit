@@ -1,6 +1,6 @@
 package files
 
-import boss.{BossCase, BossSerializable}
+import boss.{ BossCase, BossSerializable }
 import models.HashId
 
 import scala.scalajs.js
@@ -10,21 +10,21 @@ import scala.scalajs.js
 //check examples here http://www.g-widgets.com/2018/05/08/working-with-json-in-scala-js/
 class FileMetaInfo extends js.Object {
   var fileName: String = _
-  var hashId: js.Array[Byte] = _
+  var hashId: String = _
   var description: String = _
   var __type: String = "file"
 }
 
 class ArchiveMetaInfo extends js.Object {
-  var fileInfos: js.Array[FileMetaInfo] = _
+  var filesMeta: js.Array[FileMetaInfo] = _
   var itemIds: js.Array[Double] = _
 }
 
 class FileBoss(
-                   val fileName: String,
-                   val hashId: HashId,
-                   fileDescription: String
-                   ) extends BossSerializable {
+  val fileName: String,
+  val hashId: HashId,
+  fileDescription: String
+) extends BossSerializable {
   override def toJS: Any = FileBossJS(fileName, hashId, fileDescription)
 }
 
@@ -39,7 +39,8 @@ object FileBoss {
   }
 }
 
-case class FileBossJS(fileName: String,
-                      hashId: HashId,
-                      fileDescription: String
-                     ) extends BossCase
+case class FileBossJS(
+  fileName: String,
+  hashId: HashId,
+  fileDescription: String
+) extends BossCase

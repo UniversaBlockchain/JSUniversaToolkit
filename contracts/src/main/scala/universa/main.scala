@@ -1,27 +1,31 @@
 package universa
 
 import boss.Boss
+import files.{ FileBoss, FileBossJS }
 import models._
-import xchange.{LocalTimeDifference, LocalTimeDifferenceJS, OrderExported, OrderJS}
-// import cloud.models._
 import org.scalajs.dom
+import storage.Storage
 
+import xchange.{LocalTimeDifference, LocalTimeDifferenceJS, OrderExported, OrderJS}
+
+import scala.async.Async.async
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.scalajs.js
 import scala.scalajs.js.annotation.JSExportTopLevel
 
-object CryptoCloudStarter {
-
+object main {
   def main(args: Array[String]): Unit = {
     if (!js.isUndefined(dom.window)) {
-
       dom.window.onload = { _ =>
-        registerBasicModels()
+        async {
+          registerModels()
+        }
       }
     }
   }
 
-  @JSExportTopLevel("Universa.registerBasicModels")
-  def registerBasicModels(): Unit = {
+  @JSExportTopLevel("Universa.registerModels")
+  def registerModels(): Unit = {
     Boss.registerClass[PublicKeyJS](PublicKeyExported.fromJS, "RSAPublicKey")
     Boss.registerClass[KeyRecordJS](KeyRecord.fromJS, "KeyRecord")
     Boss.registerClass[KeyAddressJS](KeyAddress.fromJS, "KeyAddress")
@@ -31,7 +35,7 @@ object CryptoCloudStarter {
 
     Boss.registerClass[RoleSimpleJS](RoleSimple.fromJS, "SimpleRole")
     Boss.registerClass[RoleLinkJS](RoleLink.fromJS, "RoleLink")
-    Boss.registerClass[RoleListJS](RoleList.fromJS, "RoleList")
+    Boss.registerClass[RoleListJS](RoleList.fromJS, "ListRole")
 
     Boss.registerClass[RevokePermissionJS](RevokePermission.fromJS, "RevokePermission")
     Boss.registerClass[ChangeOwnerPermissionJS](ChangeOwnerPermission.fromJS, "ChangeOwnerPermission")
@@ -39,6 +43,7 @@ object CryptoCloudStarter {
     Boss.registerClass[SplitJoinPermissionJS](SplitJoinPermission.fromJS, "SplitJoinPermission")
     Boss.registerClass[ModifyDataPermissionJS](ModifyDataPermission.fromJS, "ModifyDataPermission")
 
+    Boss.registerClass[ReferenceJS](Reference.fromJS, "com.icodici.universa.contract.Reference")
     Boss.registerClass[UniversaContractJS](UniversaContract.fromJS, "UniversaContract")
     Boss.registerClass[HashIdJS](HashId.fromJS, "HashId")
     Boss.registerClass[TransactionPackJS](TransactionPackExported.fromJS, "TransactionPack")
@@ -48,7 +53,15 @@ object CryptoCloudStarter {
     Boss.registerClass[ParcelJS](ParcelExported.fromJS, "Parcel")
     Boss.registerClass[OrderJS](OrderExported.fromJS, "Order")
 
-    // Boss.registerClass[FileBossJS](FileBoss.fromJS, "File")
+    Boss.registerClass[FileBossJS](FileBoss.fromJS, "File")
     Boss.registerClass[LocalTimeDifferenceJS](LocalTimeDifference.fromJS, "LocalTimeDifference")
+
+    Boss.registerClass[BulkExchangeJS](BulkExchange.fromJS, "BulkExchange")
+
+    xchange.XChangeAPI.getTimeOffsetWithUniversaNetwork()
+      .foreach{offset =>
+        val diffObject = new LocalTimeDifference(offset, js.Date.now())
+        Storage.timeStorage.set("universaTimeOffset", diffObject)
+      }
   }
 }

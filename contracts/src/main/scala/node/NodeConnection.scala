@@ -11,6 +11,7 @@ import scala.collection.mutable
 import scala.collection.mutable.{HashMap, ListBuffer}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
+import scala.scalajs.js.JSON
 import scala.scalajs.js.JSConverters._
 import scala.scalajs.js.URIUtils._
 import scala.scalajs.js.annotation.{JSExport, JSExportTopLevel}
@@ -18,8 +19,8 @@ import scala.scalajs.js.typedarray.{ArrayBuffer, Uint8Array}
 
 @JSExportTopLevel("Node.ApiError")
 class ApiError(
-  val message: String = "Node API error",
-  val details: HashMap[String, Any] = HashMap[String, Any]()
+  var message: String = "Node API request failed",
+  var details: HashMap[String, Any] = HashMap[String, Any]()
 ) extends Exception(message) {
   @JSExport("message")
   val messageJS = message
@@ -27,7 +28,10 @@ class ApiError(
   @JSExport("details")
   val detailsJS = details.toJSDictionary
 
-  override def toString: String = s"EncryptionError: $message"
+  override def toString: String = {
+    val detailsJSON = JSON.stringify(Boss.write(details))
+    s"Error: $message, details: $detailsJSON"
+  }
 }
 
 object ApiError {
@@ -36,7 +40,7 @@ object ApiError {
   }
 
   def apply(details: HashMap[String, Any]): ApiError = {
-    new ApiError("Node API error", details)
+    new ApiError("Node API request failed", details)
   }
 }
 
@@ -46,7 +50,7 @@ object ApiError {
  * @param nodeKey - public key of node
  * @param clientKey - private key of current API user
  */
-class NodeConnection(val url: String, nodeKey: PublicKey, clientKey: PrivateKey) {
+class NodeConnection(val url: String, nodeKey: PublicKey, clientKey: PrivateKey, proxyOptions: HashMap[String, Any] = HashMap[String, Any]()) {
   var sessionId: Option[String] = None
   var sessionKey: Option[SymmetricKey] = None
   var connectMessage: Option[String] = None
@@ -54,15 +58,15 @@ class NodeConnection(val url: String, nodeKey: PublicKey, clientKey: PrivateKey)
   /** Connects to Node */
   def connect: Future[NodeConnection] = {
     val self = this
-    val safeURL = url.replace("http", "https").replace(":80", ":443")
+    val safeURL = NodeConnection.https(url)
     val clientNonce = randomBytes(47)
 
-    println(s"setting up protected connection to $url")
+    println(s"setting up protected connection to $safeURL")
 
-    val connectReq = NodeConnection.bossRequest(s"$url/connect", HashMap(
+    val connectReq = NodeConnection.bossRequest(s"$safeURL/connect", HashMap(
       ("client_key", clientKey.publicKey.pack),
       ("jsapi", true)
-    ))
+    ), proxyOptions)
 
     def getToken(connectData: HashMap[String, Any]): Future[HashMap[String, Any]] = {
       sessionId = Some(connectData("session_id").asInstanceOf[String])
@@ -72,11 +76,11 @@ class NodeConnection(val url: String, nodeKey: PublicKey, clientKey: PrivateKey)
         ("server_nonce", connectData("server_nonce").asInstanceOf[Seq[Byte]])
       ))
 
-      NodeConnection.bossRequest(s"$url/get_token", HashMap(
+      NodeConnection.bossRequest(s"$safeURL/get_token", HashMap(
         ("signature", clientKey.sign(data)),
         ("session_id", sessionId.get),
         ("data", data)
-      ))
+      ), proxyOptions)
     }
 
     def testConnection(token: mutable.HashMap[String, Any]): Future[NodeConnection] = {
@@ -142,7 +146,7 @@ class NodeConnection(val url: String, nodeKey: PublicKey, clientKey: PrivateKey)
       ("command", "command"),
       ("params", sk.encrypt(callData)),
       ("session_id", sessionId.get)
-    )) map { response =>
+    ), proxyOptions) map { response =>
         val encryptedResult = response("result").asInstanceOf[Seq[Byte]]
         val decrypted = sk.decrypt(encryptedResult)
         val result = Boss.load(decrypted).asInstanceOf[HashMap[String, Any]]
@@ -164,6 +168,12 @@ class NodeConnection(val url: String, nodeKey: PublicKey, clientKey: PrivateKey)
 
 /** Contains connection static methods/helpers */
 object NodeConnection {
+  def https(url: String): String = {
+    if (url.startsWith("http:")) return url.replace("http", "https").replace(":8080", ":443")
+
+    url
+  }
+
   /** Calculates contract id by it's BOSS binary
    *
    * @param packed - BOSS encoded contract
@@ -181,10 +191,13 @@ object NodeConnection {
     method: String,
     url: String,
     data: HashMap[String, Any] = HashMap[String, Any](),
-    headers: HashMap[String, String] = HashMap[String, String]()
+    headers: HashMap[String, String] = HashMap[String, String](),
+    proxyOptions: HashMap[String, Any] = HashMap[String, Any]()
   ): Future[HashMap[String, Any]] = {
     val p = Promise[HashMap[String, Any]]()
     val xhr = new dom.XMLHttpRequest()
+
+    val useProxy = proxyOptions contains "proxyURL"
 
     xhr.responseType = "arraybuffer"
 
@@ -218,7 +231,9 @@ object NodeConnection {
       )))
     }
 
-    xhr.open(method, url)
+    val finalURL = if (useProxy) proxyOptions("proxyURL").asInstanceOf[String] else url
+
+    xhr.open("POST", finalURL)
     xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded")
 
     for ((k, v) <- headers.asInstanceOf[HashMap[String, String]]) {
@@ -237,6 +252,14 @@ object NodeConnection {
       encodedData += s"$dkey=$dvalue"
     })
 
+    if (useProxy) {
+      xhr.setRequestHeader("X-CSRF-Token", proxyOptions("csrf").asInstanceOf[String])
+
+      val networkURL = encodeURIComponent(url)
+      encodedData += s"___url=$networkURL"
+      encodedData += s"___method=$method"
+    }
+
     xhr.send(encodedData.mkString("&"))
 
     p.future
@@ -249,8 +272,15 @@ object NodeConnection {
    */
   def bossRequest(
     url: String,
-    data: HashMap[String, Any]
+    data: HashMap[String, Any],
+    proxyOptions: HashMap[String, Any]
   ): Future[HashMap[String, Any]] = {
-    request("POST", url, HashMap(("requestData64", encode64(Boss.dump(data)))))
+    request(
+      "POST",
+      url,
+      HashMap(("requestData64", encode64(Boss.dump(data)))),
+      HashMap[String, String](),
+      proxyOptions
+    )
   }
 }

@@ -58,7 +58,7 @@ trait UTN_UTNPApi extends AbstractOrderApi {
 
           val originalUTN = new Contract(compound.get).original
           val tpack = Boss.load(tpackBin).asInstanceOf[TransactionPack]
-          val newUTN = tpack.mainContract.original
+          val newUTN = tpack.mainCapsule
 
           val amountEquals = originalUTN.getAmount.compare(newUTN.getAmount) == 0
           val addressEquals = newUTN.contract.get("transactional.data.receiving_ethereum_address") == returnAddress.get
@@ -74,7 +74,7 @@ trait UTN_UTNPApi extends AbstractOrderApi {
 
   override def sign(privateKey: PrivateKey): TransactionPack = {
     val tpack = Boss.load(compound.get).asInstanceOf[TransactionPack]
-    val cap = tpack.mainContract.original
+    val cap = tpack.mainCapsule
     cap.sign(privateKey)
     cap.lock
     tpack.contract = cap.currentBinary

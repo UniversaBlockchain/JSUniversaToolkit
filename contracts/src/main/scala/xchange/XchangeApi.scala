@@ -42,7 +42,7 @@ object ApiError {
 }
 
 object XChangeAPI {
-  val XCHANGE_HOST = "https://xchange.universa.io"
+  val XCHANGE_HOST = "https://xchange.mainnetwork.io"
   type Dict = HashMap[String, Any]
   type JSDict = js.Dictionary[Any]
 
@@ -105,7 +105,7 @@ object XChangeAPI {
 
   @JSExportTopLevel("XChange.getTransactionCost")
   def getTransactionCostJS(tpack: TransactionPackExported): js.Promise[JSDict] =
-    getTransactionCost(tpack.transactionPack)
+    getTransactionCost(tpack.tp)
 
   def getNetworkJsDate(): js.Date = {
     //we get current date at first, a bit earlier better than a bit later!
