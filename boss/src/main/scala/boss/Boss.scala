@@ -154,7 +154,13 @@ object Boss extends AbstractBoss {
   }
 
   def registerAlias(internal: String, alias: String): Unit = {
+    // register class name with pattern "com.icodici.---.className"
     aliasToInternal(alias) = internal
+
+    val shortName = alias.substring(alias.lastIndexOf(".") + 1)
+    // register class name with pattern "className"
+    aliasToInternal(shortName) = internal
+
     internalToAlias(internal) = alias
   }
 
@@ -231,11 +237,7 @@ object Boss extends AbstractBoss {
     val v = readInternal(value)
 
     if (isOptionalValue) Option(v)
-    else if (v != null) {
-      if (mainClassName == "SplitJoinPermissionJS" && (fieldName == "min_value" || fieldName == "min_unit")) {
-        v.toString
-      } else v
-    } else v
+    else v
   }
 
   def readInternal[P](value: P,
@@ -249,7 +251,8 @@ object Boss extends AbstractBoss {
     if (reader.isNull(value)) return null
     if (reader.isUndefined(value)) return null
 
-    val typeField = reader.readObjectField(value, "__type")
+    var typeField = reader.readObjectField(value, "__type")
+    if (reader.isUndefined(typeField)) typeField = reader.readObjectField(value, "__t")
 
     def readObject(data: P): mutable.HashMap[String, Any] = {
       val map = data.asInstanceOf[js.Dictionary[P]].map{
@@ -285,8 +288,8 @@ object Boss extends AbstractBoss {
       val typeFieldString = reader.readString(typeField)
       val shortType = typeFieldString.substring(typeFieldString.lastIndexOf(".") + 1)
       val className = reader.readType(shortType, aliasToInternal)
-
       val mayBeClassReader = readers.get(className)
+
       mayBeClassReader match {
         case Some(classReader) => {
           val jsVal = classReader.read[P](value)
